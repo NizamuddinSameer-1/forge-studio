@@ -1,5 +1,8 @@
 // ==========================================================================
-// MASTER APP CONTROLLER - FORGE STUDIO (v2.2)
+// MASTER APP CONTROLLER - FORGE STUDIO (v2.3)
+// Flow: import -> crop (Confirm Crop cuts the rest) -> colour -> anti-detect
+// on the cropped clip at its own size -> hashed clip AUTO-REPLACES the studio
+// clip -> pick canvas aspect (Fill/Fit) -> masks & text -> export.
 // ==========================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -32,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     logCount: 0,
     pollTimer: null,
     modalMinimized: false,
+    clipIsHashed: false,   // true right after the hashed clip auto-replaces the source
   };
 
   const PROFILE_BADGES = {
@@ -176,6 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function loadVideoIntoStudio(meta) {
     state.currentFile = meta.filename;
     state.meta = meta;
+    state.clipIsHashed = Boolean(meta.clipIsHashed);
 
     // A new source invalidates anything hashed from the previous one.
     resetHashState();
@@ -252,7 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnEditCrop) btnEditCrop.style.display = applied ? '' : 'none';
     if (cropModeHint) {
       cropModeHint.textContent = applied
-        ? 'Crop applied — this frame is exactly what exports. Hit Edit Crop to adjust.'
+        ? 'Crop applied — this frame is exactly what the pipeline works with. Hit Edit Crop to adjust.'
         : 'Drag the box over the frame — the dimmed area gets cut away — then hit Confirm Crop to see the real result.';
     }
   };
@@ -372,6 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   hashingToggle.addEventListener('change', () => {
     state.hashingEnabled = hashingToggle.checked;
+    state.clipIsHashed = false;
     hashingControlsWrap.classList.toggle('disabled-wrap', !state.hashingEnabled);
     updateHashButton();
     refreshStaleState();
@@ -388,19 +394,22 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (!state.engineAvailable) {
       btnRunHashingLabel.textContent = 'Hash Engine Unavailable';
       hashHint.textContent = 'Install the missing packages, then restart the studio.';
+    } else if (!state.hashingEnabled && state.clipIsHashed) {
+      btnRunHashingLabel.textContent = 'Already Anti-Detected';
+      hashHint.textContent = 'This clip is already hashed. Add masks/text, pick your canvas aspect, then Export. (Flip the switch on to hash again.)';
     } else if (!state.hashingEnabled) {
       btnRunHashingLabel.textContent = 'Hashing Disabled';
       hashHint.textContent = 'Turn the switch above back on to hash this video.';
     } else {
       btnRunHashingLabel.textContent = state.hashResult ? 'Re-run Content Hashing' : 'Run Content Hashing';
-      hashHint.textContent = 'Renders your edits, then applies the anti-detection pass. Export unlocks afterwards.';
+      hashHint.textContent = 'Runs on your cropped clip exactly as framed. The hashed clip then replaces your working clip automatically.';
     }
   }
 
   // --------------------------------------------------------------------------
   // Edit payload + staleness tracking
   // --------------------------------------------------------------------------
-  function buildPayload() {
+  function buildPayload(phase = 'export') {
     const trim = timeline.getTrimRange();
     const crop = canvasCropper.getNativeCoords();
     const color = colorGrading.getState();
@@ -410,6 +419,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const seedVal = document.getElementById('hashingSeedInput').value.trim();
     const seed = seedVal ? parseInt(seedVal, 10) : null;
     const pad = document.getElementById('hashingPadToggle').checked;
+
+    // Hash phase: keep the cropped clip's OWN dimensions — anti-detection on
+    // the clip as framed, never forced into an aspect bucket. The canvas
+    // aspect + Fill/Fit choice is applied at the final export render.
+    const exportCfg = phase === 'hash'
+      ? { resolution: 'source', aspect: 'auto', fit: 'cover' }
+      : canvasCropper.getExportConfig();
 
     return {
       filename: state.currentFile,
@@ -425,14 +441,16 @@ document.addEventListener('DOMContentLoaded', () => {
         seed: seed,
         pad: pad,
       },
-      export: {
-        resolution: canvasCropper.getExportResolution(),
-      },
+      export: exportCfg,
     };
   }
 
   function currentSignature() {
-    return JSON.stringify(buildPayload());
+    // Canvas aspect / fit / size are packaging choices applied at the final
+    // render — they must not invalidate a hash of the same edits.
+    const p = buildPayload('export');
+    delete p.export;
+    return JSON.stringify(p);
   }
 
   function refreshStaleState() {
@@ -467,7 +485,6 @@ document.addEventListener('DOMContentLoaded', () => {
     state.pendingSignature = null;
     document.getElementById('hashResultCard').style.display = 'none';
     document.getElementById('btnDownloadHash').removeAttribute('href');
-    document.getElementById('modalOutputVideo').removeAttribute('src');
     updateExportLabel(false);
     updateHashButton();
   }
@@ -476,14 +493,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const controlsPanel = document.getElementById('controlsPanel');
   controlsPanel.addEventListener('input', refreshStaleState);
   controlsPanel.addEventListener('change', refreshStaleState);
-  // Canvas drags (crop/mask/text) and export-size clicks don't emit
+  // Canvas drags (crop/mask/text) and canvas/export clicks don't emit
   // input/change events - catch them so the stale badge updates instantly.
   stageCanvasContainer.addEventListener('pointerup', refreshStaleState);
   const exportResEl = document.getElementById('exportResolution');
   if (exportResEl) exportResEl.addEventListener('click', refreshStaleState);
+  const canvasFitEl = document.getElementById('canvasFit');
+  if (canvasFitEl) canvasFitEl.addEventListener('click', refreshStaleState);
 
   // --------------------------------------------------------------------------
-  // The hashing step (with exact 3-stage stepper)
+  // The hashing step (with exact 3-stage stepper) + auto-replace of the clip
   // --------------------------------------------------------------------------
   const exportModal = document.getElementById('exportModal');
   const modalProcessing = document.getElementById('modalProcessingState');
@@ -578,7 +597,8 @@ document.addEventListener('DOMContentLoaded', () => {
     btnRunHashing.classList.add('is-running');
     btnRunHashingLabel.textContent = 'Hashing...';
 
-    const payload = buildPayload();
+    // Hash phase payload: cropped clip at its OWN size, no aspect forcing.
+    const payload = buildPayload('hash');
 
     try {
       const res = await fetch('/api/hash', {
@@ -591,8 +611,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       state.jobId = data.job_id;
       state.logCount = 0;
-      // Remember the exact settings this run used, so edits made *during* the
-      // run are still detected as stale when it finishes.
       state.pendingSignature = currentSignature();
       appendLog(`[INIT] Job ${data.job_id} started — profile ${payload.hashing.profile}`, 'info');
       startPolling();
@@ -684,17 +702,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
     refreshStaleState();
     updateHashButton();
-    revealHashCard();
     loadStorage();
 
     showSuccessModal(
       result,
       'Hashing Complete',
       result.hash_changed
-        ? 'Your video is hashed and unique. Export it whenever you are ready.'
+        ? 'Anti-detected clip is now loaded in the studio — keep editing or export.'
         : 'Hashing finished, but the file hash did not change — try a stronger profile.'
     );
     showToast('Content hashing complete!', 'success');
+
+    // Auto-replace: the anti-detected clip becomes the studio's working clip.
+    autoAdopt(result);
+  }
+
+  /**
+   * Swap the studio's working clip to the freshly hashed file, so the user
+   * keeps editing (canvas aspect, masks, text) on the ANTI-DETECTED clip and
+   * exports from it — no manual download/re-upload.
+   */
+  async function autoAdopt(result) {
+    try {
+      const res = await fetch('/api/adopt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: result.file_name }),
+      });
+      const meta = await res.json();
+      if (!res.ok) throw new Error(meta.detail || 'adopt failed');
+
+      meta.clipIsHashed = true;
+      loadVideoIntoStudio(meta);
+
+      // Fresh edits on the new clip.
+      colorGrading.reset();
+      maskOverlay.clearAll();
+      while (textOverlay.layers.length > 0) {
+        textOverlay.activeLayerId = textOverlay.layers[0].id;
+        textOverlay.deleteActive();
+      }
+
+      // This clip is already anti-detected — skip re-hashing by default.
+      state.clipIsHashed = true;
+      state.hashingEnabled = false;
+      hashingToggle.checked = false;
+      hashingControlsWrap.classList.add('disabled-wrap');
+      updateHashButton();
+      loadStorage();
+      showToast('Anti-detected clip loaded into the studio — pick your canvas aspect, add masks/text, then Export.', 'success');
+    } catch (e) {
+      // Fallback: keep the old clip; the hashed file is still in the result card.
+      showToast(`Hashed file is ready in the result card (auto-load failed: ${e.message})`, 'error');
+    }
   }
 
   function onHashFailed(message) {
@@ -724,7 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
     video.pause();
     timeline.setPlaying(false);
 
-    if (state.hashingEnabled && state.hashedPayload !== currentSignature()) {
+    if (state.hashingEnabled && !state.clipIsHashed && state.hashedPayload !== currentSignature()) {
       showToast('Your edits changed since hashing — run Content Hashing again.', 'error');
       document.getElementById('tabBtnHashing').click();
       btnRunHashing.classList.add('is-ready');
@@ -735,7 +795,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload()),
+        body: JSON.stringify(buildPayload('export')),
       });
       const data = await res.json();
 
@@ -791,10 +851,13 @@ document.addEventListener('DOMContentLoaded', () => {
     colorGrading.reset();
     canvasCropper.resetToFull();
     maskOverlay.clearAll();
-    // Reset export size back to 1080p
     document.querySelectorAll('#exportResolution .export-size-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.res === '1080p');
     });
+    document.querySelectorAll('#canvasFit .mode-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.fit === 'cover');
+    });
+    canvasCropper.exportFit = 'cover';
     canvasCropper.updateBadge();
     while (textOverlay.layers.length > 0) {
       textOverlay.activeLayerId = textOverlay.layers[0].id;
@@ -924,6 +987,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function clearLoadedVideo() {
     state.currentFile = null;
     state.meta = null;
+    state.clipIsHashed = false;
     video.pause();
     video.removeAttribute('src');
     video.load();
