@@ -54,14 +54,7 @@ def work_dir() -> Path:
 
 
 def ml_stage_status() -> Dict[str, Any]:
-    """Can the optional Stage 1.5 (AI) pass actually run in this interpreter?
-
-    v7_pipeline.ml.ml_available() only checks for torch, so on a machine with
-    torch but no open_clip it reports True and the stage is attempted, fails
-    inside the CLIP encoder, and quietly returns the unmodified file. Several
-    profiles advertise ml_stage=True, so we report what will really happen
-    rather than letting the studio imply AI protection that isn't there.
-    """
+    """Can the optional Stage 1.5 (AI) pass actually run in this interpreter?"""
     import importlib.util
 
     has_torch = importlib.util.find_spec("torch") is not None
@@ -110,8 +103,8 @@ FONT_MAP = {
 }
 
 # Emoji / symbol glyphs do not exist in the bundled Arial/Impact fonts, so a
-# caption like "POV: you" + emoji would render hollow boxes. When a layer
-# contains non-Latin glyphs we swap its fontfile to the OS emoji font if found.
+# caption with emoji would render hollow boxes. When a layer contains
+# non-Latin glyphs we swap its fontfile to the OS emoji font if one exists.
 EMOJI_FONT_CANDIDATES = [
     Path("C:/Windows/Fonts/segoeuiemoji.ttf"),       # Windows 10/11
     Path("C:/Windows/Fonts/seguiemj.ttf"),           # older Windows name
@@ -150,29 +143,23 @@ def probe_video(video_path: str | Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"Video file not found: {p}")
 
     cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,r_frame_rate,duration,codec_name:format=duration,size",
-        "-of", "json",
-        str(p),
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries",
+        "stream=width,height,r_frame_rate,duration,codec_name:format=duration,size",
+        "-of", "json", str(p),
     ]
     try:
-        # A timeout matters here: without one, a wedged ffprobe hangs the
-        # request (and any job) forever.
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
         data = json.loads(res.stdout)
         stream = data.get("streams", [{}])[0] if data.get("streams") else {}
         fmt = data.get("format", {})
 
-        # Parse duration
         duration = 0.0
         if "duration" in stream and stream["duration"] not in (None, "N/A"):
             duration = float(stream["duration"])
         elif "duration" in fmt and fmt["duration"] not in (None, "N/A"):
             duration = float(fmt["duration"])
 
-        # Parse fps
         fps = 30.0
         r_fps = stream.get("r_frame_rate", "30/1")
         if "/" in r_fps:
@@ -200,10 +187,6 @@ def probe_video(video_path: str | Path) -> Dict[str, Any]:
 # ==========================================================================
 # Export canvas - the fix for "my 9:16 crop exports at a random resolution"
 # ==========================================================================
-# The editor canvas and the final export now agree on EXACT platform-standard
-# dimensions. The hash engine no longer rescales (it used to force 1280-wide
-# portrait / 720-tall landscape, and its blur-border /10*10 trick truncated
-# 1920 -> 2270px, drifting off the true aspect ratio).
 EXPORT_CANVASES: Dict[str, Dict[str, Tuple[int, int]]] = {
     "9:16": {"1080p": (1080, 1920), "720p": (720, 1280)},
     "4:5": {"1080p": (1080, 1350), "720p": (720, 900)},
@@ -212,19 +195,54 @@ EXPORT_CANVASES: Dict[str, Dict[str, Tuple[int, int]]] = {
     "16:9": {"1080p": (1920, 1080), "720p": (1280, 720)},
 }
 
+ASPECT_RATIOS: Dict[str, Tuple[int, int]] = {
+    "9:16": (9, 16),
+    "4:5": (4, 5),
+    "1:1": (1, 1),
+    "4:3": (4, 3),
+    "16:9": (16, 9),
+}
+
 EXPORT_RESOLUTIONS = ("1080p", "720p", "source")
 
 
-def resolve_export_canvas(crop_w: int, crop_h: int, resolution: str = "1080p") -> Tuple[int, int]:
-    """Map a user crop to the exact export canvas for its aspect bucket.
+def _even(v: float) -> int:
+    v = max(2, int(round(v)))
+    return v - (v % 2)
 
-    "source" keeps the crop's own even-clamped dimensions (no scaling at all).
+
+def resolve_export_canvas(
+    crop_w: int,
+    crop_h: int,
+    resolution: str = "1080p",
+    aspect: str = "auto",
+) -> Tuple[int, int]:
+    """Map a user crop to the exact export canvas.
+
+    aspect "auto" buckets the crop's own aspect to the nearest platform ratio;
+    an explicit aspect ("9:16" etc.) forces that canvas - the user's "apply
+    9:16 to my whole canvas" control.
+    "source" keeps the crop's own even dimensions (no scaling at all), unless
+    an explicit aspect is set, in which case the smallest canvas of that
+    ratio covering the crop is used.
     """
     res = (resolution or "1080p").lower()
+    aspect = (aspect or "auto").strip()
+
     if res == "source":
-        return (max(2, crop_w - crop_w % 2), max(2, crop_h - crop_h % 2))
+        if aspect in ASPECT_RATIOS:
+            rw, rh = ASPECT_RATIOS[aspect]
+            r2 = rw / rh
+            if (crop_w / max(1, crop_h)) > r2:
+                return (_even(crop_w), _even(crop_w / r2))
+            return (_even(crop_h * r2), _even(crop_h))
+        return (_even(crop_w), _even(crop_h))
+
     if res not in ("1080p", "720p"):
         res = "1080p"
+    if aspect in EXPORT_CANVASES:
+        return EXPORT_CANVASES[aspect][res]
+
     r = crop_w / max(1, crop_h)
     if r < 0.65:
         bucket = "9:16"
@@ -240,8 +258,7 @@ def resolve_export_canvas(crop_w: int, crop_h: int, resolution: str = "1080p") -
 
 
 def escape_drawtext(text: str) -> str:
-    """Escape text for FFmpeg drawtext filter."""
-    # FFmpeg drawtext requires escaping \, :, ', %, [, ]
+    """Escape text for FFmpeg drawtext filter (\\, :, ', %, [, ])."""
     text = text.replace("\\", "\\\\")
     text = text.replace("'", "'\\''")
     text = text.replace(":", "\\:")
@@ -278,8 +295,6 @@ def _color_filters(cg: Optional[Dict[str, Any]]) -> List[str]:
     shadows = _clip(float(cg.get("shadows", 0.0)), -1.0, 1.0)
     highlights = _clip(float(cg.get("highlights", 0.0)), -1.0, 1.0)
     if abs(shadows) > 0.01 or abs(highlights) > 0.01:
-        # colorlevels: rimin<0 lifts blacks (matte shadows), rimax<1 expands
-        # highlights brighter, romax<1 dims whites (highlight recovery).
         rimin = -0.22 * shadows
         rimax = 1.0 - 0.25 * highlights if highlights > 0 else 1.0
         romax = 1.0 if highlights >= 0 else max(0.45, 1.0 + 0.25 * highlights)
@@ -310,8 +325,6 @@ def _color_filters(cg: Optional[Dict[str, Any]]) -> List[str]:
     temperature = _clip(float(cg.get("temperature", 0.0)), -0.5, 0.5)
     tint = _clip(float(cg.get("tint", 0.0)), -1.0, 1.0)
     if abs(temperature) > 0.01 or abs(tint) > 0.01:
-        # Full-range warmth (red/blue) and green/magenta tint across shadows,
-        # midtones and highlights - closer to CapCut than shadows-only.
         rs, rm, rh = temperature * 0.30, temperature * 0.34, temperature * 0.22
         bs, bm, bh = -rs, -rm, -rh
         gs, gm, gh = tint * 0.16, tint * 0.30, tint * 0.14
@@ -323,7 +336,6 @@ def _color_filters(cg: Optional[Dict[str, Any]]) -> List[str]:
 
     fade = _clip(float(cg.get("fade", 0.0)), 0.0, 1.0)
     if fade > 0.01:
-        # Filmic fade: lift black point, ease off whites.
         y0 = 0.16 * fade
         y2 = 1.0 - 0.08 * fade
         filters.append(f"curves=master='0/{y0:.3f} 0.5/0.5 1/{y2:.3f}'")
@@ -335,7 +347,6 @@ def _color_filters(cg: Optional[Dict[str, Any]]) -> List[str]:
 
     vignette = _clip(float(cg.get("vignette", 0.0)), 0.0, 1.0)
     if vignette > 0.01:
-        # vignette 'angle': PI/2 = no effect; smaller = stronger dark corners.
         angle = 1.5708 - vignette * 1.1708  # 1 -> 0.40 rad (strong)
         filters.append(f"vignette=angle={angle:.4f}:mode=forward")
 
@@ -422,7 +433,6 @@ def _text_filters(
         tx = max(0, min(frame_w - 8, int(layer.get("x", 50))))
         ty = max(0, min(frame_h - 8, int(layer.get("y", 50))))
 
-        # Optional visibility window, e.g. CapCut-style timed captions.
         enable = ""
         start = layer.get("start")
         end = layer.get("end")
@@ -433,7 +443,6 @@ def _text_filters(
             elif s > 0:
                 enable = f":enable='gte(t,{s:.3f})'"
 
-        # Multi-line captions: one drawtext per line, stacked with leading.
         lines = raw.splitlines() or [raw]
         line_h = int(round(font_size * 1.28))
         for li, line in enumerate(lines):
@@ -473,9 +482,12 @@ def build_filter_chain(
       Crop -> Canvas fit (exact export size) -> Colour suite -> Masks -> Text.
     Returns (filter_complex_string, final_w, final_h).
 
-    Mask and text coordinates arrive in CROP space; after the canvas fit they
-    are scaled by the same factor the frame was, so what you see on the
-    studio canvas is exactly what lands in the export.
+    Canvas fit modes (export.fit):
+      "cover"   - CapCut "Fill": scale to cover the canvas, centre-crop excess.
+      "contain" - CapCut "Fit": scale to fit inside the canvas and pad with a
+                  blurred copy of the frame (blurred bars, no content lost).
+    Mask and text coordinates arrive in CROP space; they are scaled by the
+    same factor the content frame was, so the preview matches the export.
     """
     # 1. Crop rectangle (clamped, even)
     if crop and crop.get("enabled", True):
@@ -496,20 +508,25 @@ def build_filter_chain(
         cx = 0
         cy = 0
 
-    # 2. Exact export canvas (cover-fit: scale up to fill, centre-crop the rest)
+    # 2. Exact export canvas
     resolution = (export or {}).get("resolution", "1080p")
-    canvas_w, canvas_h = resolve_export_canvas(cw, ch, resolution)
+    aspect = (export or {}).get("aspect", "auto")
+    fit = str((export or {}).get("fit", "cover")).lower()
+    canvas_w, canvas_h = resolve_export_canvas(cw, ch, resolution, aspect)
 
-    filter_stages: List[str] = [f"crop={cw}:{ch}:{cx}:{cy}"]
-    if (canvas_w, canvas_h) != (cw, ch):
-        filter_stages.append(
-            f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase:flags=bicubic"
-        )
-        filter_stages.append(f"crop={canvas_w}:{canvas_h}")
+    needs_canvas = (canvas_w, canvas_h) != (cw, ch)
+    use_contain = fit == "contain" and needs_canvas
 
-    # Coordinate space conversion for overlays added after the canvas fit
-    sx = canvas_w / cw if cw else 1.0
-    sy = canvas_h / ch if ch else 1.0
+    if use_contain:
+        r = min(canvas_w / cw, canvas_h / ch)
+        fg_w = _even(cw * r)
+        fg_h = _even(ch * r)
+        sx = fg_w / cw
+        sy = fg_h / ch
+    else:
+        fg_w, fg_h = canvas_w, canvas_h
+        sx = canvas_w / cw if cw else 1.0
+        sy = canvas_h / ch if ch else 1.0
 
     def _scale_mask(m: Dict[str, Any]) -> Dict[str, Any]:
         scaled = dict(m)
@@ -529,19 +546,45 @@ def build_filter_chain(
 
     scaled_masks = [_scale_mask(m) for m in (masks or [])]
     scaled_text = [_scale_text(t) for t in (text_layers or [])]
+    color_filters = _color_filters(color_grade)
 
-    # 3. Colour suite
-    filter_stages.extend(_color_filters(color_grade))
+    if use_contain:
+        # --- Fit (blurred bars): grade+overlay the fitted foreground, then
+        # pad it onto a blurred cover copy of itself.
+        fg_linear = f"crop={cw}:{ch}:{cx}:{cy},scale={fg_w}:{fg_h}:flags=bicubic"
+        if color_filters:
+            fg_linear += "," + ",".join(color_filters)
+
+        graph = f"[0:v]{fg_linear},split=2[fg_m][fg_bg];"
+        graph += (
+            f"[fg_bg]scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase:flags=bicubic,"
+            f"crop={canvas_w}:{canvas_h},boxblur=luma_radius=24:luma_power=2[bg_canvas]"
+        )
+        mask_graph, last = _mask_graph(scaled_masks, fg_w, fg_h, "[fg_m]")
+        graph += mask_graph
+        text_filters = _text_filters(scaled_text, fg_w, fg_h)
+        if text_filters:
+            graph += f";{last}{','.join(text_filters)}[fg_fin]"
+            last = "[fg_fin]"
+        graph += f";[bg_canvas]{last}overlay=(W-w)/2:(H-h)/2[v_out]"
+        return graph, canvas_w, canvas_h
+
+    # --- Fill (cover) or exact-size path
+    filter_stages: List[str] = [f"crop={cw}:{ch}:{cx}:{cy}"]
+    if needs_canvas:
+        filter_stages.append(
+            f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase:flags=bicubic"
+        )
+        filter_stages.append(f"crop={canvas_w}:{canvas_h}")
+    filter_stages.extend(color_filters)
 
     combined_linear = ",".join(filter_stages)
 
-    # 4. Masks (any number, blur or pixelate)
     last_v_tag = "[v_cg]"
     complex_graph = f"[0:v]{combined_linear}{last_v_tag}"
     mask_graph, last_v_tag = _mask_graph(scaled_masks, canvas_w, canvas_h, last_v_tag)
     complex_graph += mask_graph
 
-    # 5. Text layers
     text_filters = _text_filters(scaled_text, canvas_w, canvas_h)
     if text_filters:
         complex_graph += f";{last_v_tag}{','.join(text_filters)}[v_out]"
@@ -566,10 +609,7 @@ def render_edit(
     export: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
-    Executes FFmpeg rendering of all user edits:
-    Trim -> Crop -> Canvas fit -> Colour suite -> Masks -> Text overlays.
-    Outputs a clean H.264 video at the exact export canvas size.
-
+    Executes FFmpeg rendering of all user edits at the exact export canvas.
     Prints `RENDER_PROGRESS <pct>` lines so callers can show real progress.
     """
     in_p = Path(input_video)
@@ -594,7 +634,6 @@ def render_edit(
 
     cmd = ["ffmpeg", "-y", "-nostats", "-loglevel", "error", "-progress", "pipe:1"]
 
-    # Precision trimming
     if trim_start > 0.05:
         cmd.extend(["-ss", f"{trim_start:.3f}"])
 
@@ -621,7 +660,6 @@ def render_edit(
 
     print(f"[FFmpeg] Running editor render ({fw}x{fh})...")
     t0 = time.time()
-    # Duration-scaled cap so a wedged ffmpeg can never hang the request forever.
     timeout = max(600.0, total_dur * 30) if total_dur > 0 else 1800.0
 
     proc = None
@@ -693,14 +731,9 @@ def execute_full_pipeline(
     on_stage: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """
-    Unified master pipeline:
-    1. Reads source video.
-    2. Renders custom user edits (crop, trim, colour suite, masks, text) at
-       the exact export canvas size to a temp file.
-    3. If apply_hashing is True, runs v7_pipeline.stage1.process_video(...) on
-       the edited video with rescale disabled, so the hashed output keeps the
-       exact export dimensions instead of the engine's old forced re-scale.
-    4. Verifies SHA-256 and gathers output metrics.
+    Unified master pipeline: render edits at the exact export canvas, then
+    optionally run the V7 hash with rescale disabled so the hashed output
+    keeps the exact export dimensions.
 
     `on_stage` receives structured `[STAGE k/N] label` markers for the UI.
     """
@@ -723,8 +756,6 @@ def execute_full_pipeline(
     if masks is None and mask is not None:
         masks = [mask]
 
-    # Hashing was explicitly requested but the engine never loaded. Emitting an
-    # unhashed file here would be a silent and dangerous failure, so refuse.
     if apply_hashing and v7_process_video is None:
         return {
             "success": False,
@@ -738,10 +769,8 @@ def execute_full_pipeline(
 
     stem = _clean_stem(in_p.stem)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    # Intermediate render goes to scratch space, never into the outputs folder.
     temp_edited = work_dir() / f"{stem}_edit_{ts}.mp4"
 
-    # Compute source SHA-256
     source_hash = ""
     try:
         if sha256_file:
@@ -753,7 +782,6 @@ def execute_full_pipeline(
     final_output_file: Optional[Path] = None
 
     try:
-        # Stage 1: Render the user's edits at the exact export canvas
         _stage(f"[STAGE 1/{total_stages}] Rendering edits - crop, colour, masks, text")
         try:
             render_ok = render_edit(
@@ -776,7 +804,6 @@ def execute_full_pipeline(
                 "error": "Video rendering failed during editing stage.",
             }
 
-        # Stage 2: Content hashing pipeline (no re-scale - keep export canvas)
         if apply_hashing:
             _stage(f"[STAGE 2/{total_stages}] V7 {hashing_profile} hash encode - anti-detection pass")
             print(f"[Pipeline] Passing edited video to v7_pipeline with profile: {hashing_profile}")
@@ -803,14 +830,12 @@ def execute_full_pipeline(
             final_output_file = out_d / f"{stem}_edited_{ts}.mp4"
             shutil.move(str(temp_edited), str(final_output_file))
     finally:
-        # The intermediate render is never a deliverable, however we exit.
         try:
             if temp_edited.exists():
                 temp_edited.unlink()
         except Exception:
             pass
 
-    # Output inspection
     final_hash = ""
     try:
         if sha256_file and final_output_file.exists():
