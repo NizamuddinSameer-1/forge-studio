@@ -32,6 +32,7 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 from app.editor_engine import (
+    EXPORT_RESOLUTIONS,
     FONT_MAP,
     PIPELINE_AVAILABLE,
     PIPELINE_ERROR,
@@ -45,7 +46,7 @@ from app.editor_engine import (
 app = FastAPI(
     title="Custom Video Editing Micro-Studio",
     description="Video editing studio integrated with v7 content hashing pipeline",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 # Enable CORS for local development
@@ -95,15 +96,25 @@ class ColorGradeConfig(BaseModel):
     contrast: float = 1.0     # 0.1 to 2.5
     saturation: float = 1.0   # 0.0 to 3.0
     temperature: float = 0.0  # -0.5 to 0.5
+    # CapCut-style extended suite (all identity by default)
+    exposure: float = 0.0     # -1.0 to 1.0 (gamma)
+    highlights: float = 0.0   # -1.0 to 1.0 (colorlevels white point)
+    shadows: float = 0.0      # -1.0 to 1.0 (colorlevels black point)
+    tint: float = 0.0         # -1.0 to 1.0 (green <-> magenta)
+    fade: float = 0.0         # 0.0 to 1.0 (filmic fade via curves)
+    grain: float = 0.0        # 0.0 to 1.0 (film grain)
+    vignette: float = 0.0     # 0.0 to 1.0 (darkened corners)
 
 
 class MaskConfig(BaseModel):
-    enabled: bool = False
+    id: str = "mask_1"
+    enabled: bool = True
     x: int = 50
     y: int = 50
     width: int = 200
     height: int = 100
-    blur: int = 20
+    blur: int = 20            # blur radius, or pixel block size in pixelate mode
+    mode: str = "blur"        # "blur" | "pixelate"
 
 
 class TextLayer(BaseModel):
@@ -119,6 +130,8 @@ class TextLayer(BaseModel):
     bg_enabled: bool = False
     bg_color: str = "#000000"
     bg_opacity: float = 0.6
+    start: Optional[float] = None  # show from (seconds); None = whole clip
+    end: Optional[float] = None    # hide after (seconds); None = whole clip
 
 
 class HashingConfig(BaseModel):
@@ -128,15 +141,23 @@ class HashingConfig(BaseModel):
     pad: bool = True
 
 
+class ExportConfig(BaseModel):
+    # Exact output canvas. "1080p" -> 1080x1920 for 9:16 crops (platform
+    # standard), "720p" -> 720x1280, "source" -> keep the crop's own size.
+    resolution: str = Field("1080p", description="1080p | 720p | source")
+
+
 class ProcessVideoRequest(BaseModel):
     filename: str
     trim_start: float = 0.0
     trim_end: Optional[float] = None
     crop: Optional[CropConfig] = None
     color_grade: Optional[ColorGradeConfig] = None
-    mask: Optional[MaskConfig] = None
+    mask: Optional[MaskConfig] = None          # legacy single mask
+    masks: Optional[List[MaskConfig]] = None   # preferred: any number of masks
     text_layers: Optional[List[TextLayer]] = None
     hashing: Optional[HashingConfig] = None
+    export: Optional[ExportConfig] = None
 
 
 class StorageClearRequest(BaseModel):
@@ -166,13 +187,21 @@ def _upload_path(filename: str) -> Path:
 
 def _edit_kwargs(req: ProcessVideoRequest) -> Dict[str, Any]:
     """The user's edit settings, in the shape execute_full_pipeline expects."""
+    # New multi-mask list wins; fall back to the legacy single `mask` field.
+    masks = None
+    if req.masks is not None:
+        masks = [m.model_dump() for m in req.masks if m.enabled]
+    elif req.mask is not None:
+        masks = [req.mask.model_dump()] if req.mask.enabled else []
+
     return {
         "trim_start": req.trim_start,
         "trim_end": req.trim_end,
         "crop": req.crop.model_dump() if req.crop else None,
         "color_grade": req.color_grade.model_dump() if req.color_grade else None,
-        "mask": req.mask.model_dump() if req.mask else None,
+        "masks": masks,
         "text_layers": [t.model_dump() for t in req.text_layers] if req.text_layers else None,
+        "export": req.export.model_dump() if req.export else None,
     }
 
 
@@ -226,6 +255,20 @@ _MAX_JOBS_KEPT = 20
 # encode on a slow machine, but finite.
 JOB_MAX_SECONDS = float(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
 
+# Overall-progress bands per pipeline stage, so the UI bar moves smoothly
+# through "Rendering edits" -> "V7 hash encode" -> "Finalizing".
+_STEP_BANDS = {
+    2: {1: (0, 85), 2: (85, 100)},
+    3: {1: (0, 30), 2: (30, 92), 3: (92, 100)},
+}
+
+
+def _band_progress(job: Dict[str, Any], pct: int) -> int:
+    step = job.get("step") or {}
+    bands = _STEP_BANDS.get(step.get("total", 3), _STEP_BANDS[3])
+    lo, hi = bands.get(step.get("current", 1), (0, 100))
+    return int(round(lo + (hi - lo) * max(0, min(100, pct)) / 100))
+
 
 def _janitor() -> None:
     """Periodically fail jobs that have clearly wedged."""
@@ -252,14 +295,18 @@ async def start_janitor() -> None:
     threading.Thread(target=_janitor, name="forge-janitor", daemon=True).start()
 
 
+_STAGE_MARKER = re.compile(r"^\[STAGE (\d+)/(\d+)\]\s*(.*)$")
+_RENDER_PROGRESS = re.compile(r"^RENDER_PROGRESS (\d{1,3})$")
+_TQDM_PROGRESS = re.compile(r"(\d{1,3})%")
+
+
 class _JobLogStream(io.TextIOBase):
     """A stdout/stderr replacement that tees every line into a job's log buffer.
 
-    The stderr variant additionally parses tqdm's progress bar into a real
-    percentage, so the studio can show true progress instead of a fake
-    indeterminate sweep. tqdm reads `sys.stderr` when the bar is constructed,
-    and uvicorn's log handlers bind their stream at startup, so redirecting
-    here does not swallow the server's own logging.
+    It additionally parses real progress markers into exact percentages, so
+    the studio shows true progress instead of a fake indeterminate sweep:
+      - `RENDER_PROGRESS n`   (editor render, band-mapped to stage 1)
+      - tqdm `NN%|...` bars   (v7 hash encode, band-mapped to stage 2)
     """
 
     def __init__(self, job_id: str, parse_progress: bool = False):
@@ -277,13 +324,19 @@ class _JobLogStream(io.TextIOBase):
             self._pending = self._pending[match.end():]
             if not line:
                 continue
-            if self.parse_progress:
-                pct = re.search(r"(\d{1,3})%", line)
-                if pct and ("|" in line or "Encoding" in line):
-                    _set_progress(self.job_id, int(pct.group(1)))
-                    continue
+
+            # Real progress markers never spam the visible log.
+            m = _RENDER_PROGRESS.match(line)
+            if m:
+                _set_progress(self.job_id, int(m.group(1)), banded=True)
+                continue
+            pct = _TQDM_PROGRESS.search(line)
+            if self.parse_progress and pct and ("|" in line or "Encoding" in line):
+                _set_progress(self.job_id, int(pct.group(1)), banded=True)
+                continue
+
             _append_log(self.job_id, line)
-            if not self.parse_progress and "retrying with simpler audio chain" in line:
+            if "retrying with simpler audio chain" in line:
                 # The encoder restarts from 0% on this retry. Without a stage
                 # change that looks like a stall or a failure in the UI.
                 _set_stage(
@@ -299,11 +352,12 @@ class _JobLogStream(io.TextIOBase):
         return False
 
 
-def _set_progress(job_id: str, pct: int) -> None:
+def _set_progress(job_id: str, pct: int, banded: bool = False) -> None:
     with _JOBS_LOCK:
         job = JOBS.get(job_id)
-        if job is not None:
-            job["progress"] = max(0, min(100, pct))
+        if job is None:
+            return
+        job["progress"] = _band_progress(job, pct) if banded else max(0, min(100, pct))
 
 
 def _append_log(job_id: str, line: str) -> None:
@@ -323,6 +377,27 @@ def _set_stage(job_id: str, stage: str, reset_progress: bool = True) -> None:
             job["stage"] = stage
             if reset_progress:
                 job["progress"] = None
+
+
+def _on_stage(job_id: str, marker: str) -> None:
+    """Pipeline stage callback: `[STAGE k/N] label` markers drive the stepper,
+    plain strings just update the stage label."""
+    m = _STAGE_MARKER.match(marker)
+    with _JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is not None:
+            if m:
+                job["step"] = {
+                    "current": int(m.group(1)),
+                    "total": int(m.group(2)),
+                    "label": m.group(3),
+                }
+                job["stage"] = m.group(3)
+                job["progress"] = None
+            else:
+                job["stage"] = marker
+                job["progress"] = None
+            job["logs"].append(marker)
 
 
 def _running_job_id() -> Optional[str]:
@@ -348,6 +423,7 @@ def _create_job(kind: str) -> str:
             "kind": kind,
             "status": "running",
             "stage": "Queued",
+            "step": {"current": 0, "total": 3, "label": "Queued"},
             "progress": None,
             "logs": [],
             "result": None,
@@ -370,6 +446,10 @@ def _finish_job(job_id: str, result: Optional[Dict[str, Any]], error: Optional[s
         job["finished_at"] = time.time()
         if not error:
             job["stage"] = "Complete"
+            if job.get("step"):
+                job["step"]["current"] = job["step"]["total"]
+                job["step"]["label"] = "Complete"
+            job["progress"] = 100
 
 
 def _run_hash_job(
@@ -381,14 +461,14 @@ def _run_hash_job(
     in_path = UPLOADS_DIR / req.filename
     apply_hashing, profile, seed, pad = _hash_settings(req)
 
-    stream = _JobLogStream(job_id)
+    stream = _JobLogStream(job_id, parse_progress=True)
     progress_stream = _JobLogStream(job_id, parse_progress=True)
     previous_stdout = sys.stdout
     previous_stderr = sys.stderr
     try:
         sys.stdout = stream
         sys.stderr = progress_stream
-        _set_stage(job_id, "Rendering your edits with FFmpeg...")
+        _on_stage(job_id, "[STAGE 0/3] Queued")
 
         result = execute_full_pipeline(
             input_video=in_path,
@@ -397,7 +477,7 @@ def _run_hash_job(
             hashing_profile=profile,
             seed=seed,
             pad_bytes=pad,
-            on_stage=lambda stage: _set_stage(job_id, stage),
+            on_stage=lambda stage: _on_stage(job_id, stage),
             **_edit_kwargs(req),
         )
 
@@ -460,6 +540,7 @@ async def get_hashing_profiles():
     return {
         "profiles": profiles,
         "fonts": list(FONT_MAP.keys()),
+        "export_resolutions": list(EXPORT_RESOLUTIONS),
         "engine": {
             "available": PIPELINE_AVAILABLE,
             "error": PIPELINE_ERROR or None,
@@ -531,7 +612,11 @@ async def fetch_url(req: FetchUrlRequest):
         raise HTTPException(status_code=500, detail="Downloaded video file was not found.")
 
     target_file = matching[0]
-    meta = probe_video(target_file)
+    try:
+        meta = probe_video(target_file)
+    except Exception as e:
+        target_file.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Downloaded file is not a readable video: {e}")
 
     return {
         "success": True,
@@ -604,6 +689,7 @@ async def get_hash_job(job_id: str, since: int = 0):
         "job_id": job_id,
         "status": job["status"],
         "stage": job["stage"],
+        "step": job.get("step"),
         "progress": job.get("progress"),
         "logs": logs[since:],
         "log_total": len(logs),
