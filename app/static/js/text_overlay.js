@@ -1,19 +1,24 @@
 // ==========================================================================
-// TEXT OVERLAY & TYPOGRAPHY MANAGER (v2.1)
-// Multi-line captions, per-layer start/end timing, draggable on stage.
+// TEXT OVERLAY & TYPOGRAPHY MANAGER (v2.2)
+// Multi-line captions, per-layer timing, draggable — basis-aware so layers
+// stay put when the crop is confirmed and the stage re-frames.
 // ==========================================================================
 
 class TextOverlayManager {
-  constructor(container, videoElement) {
+  constructor(container, videoElement, getBasis) {
     this.container = container;
     this.video = videoElement;
+    this.getBasis = getBasis || (() => ({
+      w: container.clientWidth, h: container.clientHeight,
+      scale: 1, offX: 0, offY: 0,
+      visX: 0, visY: 0, visW: container.clientWidth, visH: container.clientHeight,
+    }));
 
     this.stageLayer = document.getElementById('textStageLayer');
     this.btnAdd = document.getElementById('btnAddTextLayer');
     this.layerEditor = document.getElementById('textLayerEditor');
     this.layersList = document.getElementById('textLayersList');
 
-    // Editor inputs
     this.inputText = document.getElementById('textInputContent');
     this.selectFont = document.getElementById('textFontFamily');
     this.inputSize = document.getElementById('textFontSize');
@@ -113,7 +118,6 @@ class TextOverlayManager {
       this.updateStageElement(layer);
     });
 
-    // Timing window (seconds). Empty = whole clip.
     const bindTiming = (input, key) => {
       if (!input) return;
       input.addEventListener('input', (e) => {
@@ -136,14 +140,13 @@ class TextOverlayManager {
 
   addLayer(presetText = 'HOOK TITLE HERE') {
     const id = `layer_${this.layerCounter++}`;
-    const cw = this.container.clientWidth;
-    const ch = this.container.clientHeight;
+    const b = this.getBasis();
 
     const newLayer = {
       id,
       text: presetText,
-      x: Math.round(cw * 0.1),
-      y: Math.round(ch * 0.15),
+      x: Math.round(b.visX + b.visW * 0.1),
+      y: Math.round(b.visY + b.visH * 0.15),
       font_family: 'Impact',
       font_size: 32,
       color: '#FFFFFF',
@@ -185,17 +188,19 @@ class TextOverlayManager {
 
     el.addEventListener('pointermove', (e) => {
       if (!isDragging) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
+      const b = this.getBasis();
+      const sc = b.scale || 1;
+      const dx = (e.clientX - startX) / sc;
+      const dy = (e.clientY - startY) / sc;
 
-      const cw = this.container.clientWidth;
-      const ch = this.container.clientHeight;
+      const modelW = el.offsetWidth / sc;
+      const modelH = el.offsetHeight / sc;
 
-      layer.x = Math.max(0, Math.min(cw - el.offsetWidth, initX + dx));
-      layer.y = Math.max(0, Math.min(ch - el.offsetHeight, initY + dy));
+      layer.x = Math.max(b.visX, Math.min(b.visX + b.visW - modelW, initX + dx));
+      layer.y = Math.max(b.visY, Math.min(b.visY + b.visH - modelH, initY + dy));
 
-      el.style.left = `${layer.x}px`;
-      el.style.top = `${layer.y}px`;
+      el.style.left = `${layer.x * sc - b.offX}px`;
+      el.style.top = `${layer.y * sc - b.offY}px`;
     });
 
     el.addEventListener('pointerup', () => {
@@ -210,16 +215,19 @@ class TextOverlayManager {
     const el = document.getElementById(`stage_${layer.id}`);
     if (!el) return;
 
+    const b = this.getBasis();
+    const sc = b.scale || 1;
+
     el.textContent = layer.text;
-    el.style.left = `${layer.x}px`;
-    el.style.top = `${layer.y}px`;
+    el.style.left = `${layer.x * sc - b.offX}px`;
+    el.style.top = `${layer.y * sc - b.offY}px`;
     el.style.fontFamily = layer.font_family;
-    el.style.fontSize = `${layer.font_size}px`;
+    el.style.fontSize = `${layer.font_size * sc}px`;
     el.style.color = layer.color;
     el.style.whiteSpace = 'pre-line';  // multi-line captions preview
 
     if (layer.stroke_width > 0) {
-      el.style.webkitTextStroke = `${layer.stroke_width}px ${layer.stroke_color}`;
+      el.style.webkitTextStroke = `${layer.stroke_width * sc}px ${layer.stroke_color}`;
     } else {
       el.style.webkitTextStroke = 'none';
     }
@@ -228,14 +236,18 @@ class TextOverlayManager {
       const hex = layer.bg_color.replace('#', '');
       const r = parseInt(hex.substring(0, 2), 16) || 0;
       const g = parseInt(hex.substring(2, 4), 16) || 0;
-      const b = parseInt(hex.substring(4, 6), 16) || 0;
-      el.style.backgroundColor = `rgba(${r}, ${g}, ${b}, ${layer.bg_opacity})`;
+      const bch = parseInt(hex.substring(4, 6), 16) || 0;
+      el.style.backgroundColor = `rgba(${r}, ${g}, ${bch}, ${layer.bg_opacity})`;
       el.style.borderRadius = '4px';
       el.style.padding = '4px 10px';
     } else {
       el.style.backgroundColor = 'transparent';
       el.style.padding = '2px 4px';
     }
+  }
+
+  refreshAllDOM() {
+    this.layers.forEach((layer) => this.updateStageElement(layer));
   }
 
   selectLayer(id) {
@@ -276,20 +288,20 @@ class TextOverlayManager {
     const layer = this.getActiveLayer();
     if (!layer) return;
 
+    const b = this.getBasis();
     const el = document.getElementById(`stage_${layer.id}`);
-    const cw = this.container.clientWidth;
-    const ch = this.container.clientHeight;
-    const elW = el ? el.offsetWidth : 100;
-    const elH = el ? el.offsetHeight : 40;
+    const sc = b.scale || 1;
+    const elW = el ? el.offsetWidth / sc : 100;
+    const elH = el ? el.offsetHeight / sc : 40;
 
-    layer.x = Math.max(0, Math.round((cw - elW) / 2));
+    layer.x = Math.max(b.visX, Math.round(b.visX + (b.visW - elW) / 2));
 
     if (pos === 'top') {
-      layer.y = Math.round(ch * 0.1);
+      layer.y = Math.round(b.visY + b.visH * 0.1);
     } else if (pos === 'center') {
-      layer.y = Math.round((ch - elH) / 2);
+      layer.y = Math.round(b.visY + (b.visH - elH) / 2);
     } else if (pos === 'bottom') {
-      layer.y = Math.round(ch * 0.82);
+      layer.y = Math.round(b.visY + b.visH * 0.82);
     }
 
     this.updateStageElement(layer);
@@ -346,13 +358,12 @@ class TextOverlayManager {
   getNativeLayers(cropNative) {
     const nw = this.video.videoWidth;
     const nh = this.video.videoHeight;
-    const cw = this.container.clientWidth;
-    const ch = this.container.clientHeight;
+    const b = this.getBasis();
 
-    if (!nw || !nh || !cw || !ch) return [];
+    if (!nw || !nh || !b.w || !b.h) return [];
 
-    const scaleX = nw / cw;
-    const scaleY = nh / ch;
+    const scaleX = nw / b.w;
+    const scaleY = nh / b.h;
 
     const cropX = cropNative ? cropNative.x : 0;
     const cropY = cropNative ? cropNative.y : 0;

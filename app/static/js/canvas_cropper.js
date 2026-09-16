@@ -1,7 +1,8 @@
 // ==========================================================================
-// INTERACTIVE CANVAS CROPPER & ASPECT RATIO MANAGER (v2.1)
-// CapCut-style: dimmed cut-away regions, center/edge snapping with guides,
-// anchored 8-handle resize, preset auto-center, live exact-export badge.
+// INTERACTIVE CANVAS CROPPER & ASPECT RATIO MANAGER (v2.2)
+// CapCut-style: dimmed cut-away, snapping, anchored handles, auto-center,
+// live export badge — plus CONFIRM CROP: applies the crop so the stage
+// shows exactly what will export (the cut-away area is removed from view).
 // ==========================================================================
 
 const EXPORT_CANVASES = {
@@ -51,14 +52,19 @@ class CanvasCropper {
     // Crop box in container pixel space: { x, y, w, h }
     this.box = { x: 0, y: 0, w: 100, h: 100 };
 
+    // Confirm-crop ("applied") state
+    this.applied = false;
+    this.appliedBox = null;   // crop rect in full-frame container px
+    this.appliedFull = null;  // { w, h } full-frame container px at apply time
+    this.appliedScale = 1;    // container px per full-frame px in applied view
+    this.onModeChange = null; // app.js wires the stage layout + buttons
+
     this.isDragging = false;
     this.isResizing = false;
     this.activeHandle = null;
     this.dragStart = { x: 0, y: 0, boxX: 0, boxY: 0, boxW: 0, boxH: 0 };
     this.snapThreshold = 8;
 
-    // Dimmed cut-away regions + center snap guides (built here so the HTML
-    // stays lean).
     this.dims = {};
     ['top', 'bottom', 'left', 'right'].forEach((k) => {
       const el = document.createElement('div');
@@ -148,13 +154,118 @@ class CanvasCropper {
     return active ? active.dataset.res : '1080p';
   }
 
+  // -------------------------------------------------------------------------
+  // Coordinate basis shared by masks & text.
+  //   w/h    = full-frame container px (for native video conversion)
+  //   scale  = screen px per model px (1 while editing)
+  //   offX/Y = screen offset of the model origin (0 while editing)
+  //   vis*   = visible rect in MODEL px (the crop window when applied)
+  // -------------------------------------------------------------------------
+  getBasis() {
+    if (this.applied && this.appliedBox && this.appliedFull) {
+      return {
+        w: this.appliedFull.w,
+        h: this.appliedFull.h,
+        scale: this.appliedScale || 1,
+        offX: this.appliedBox.x * (this.appliedScale || 1),
+        offY: this.appliedBox.y * (this.appliedScale || 1),
+        visX: this.appliedBox.x,
+        visY: this.appliedBox.y,
+        visW: this.appliedBox.w,
+        visH: this.appliedBox.h,
+      };
+    }
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    return { w, h, scale: 1, offX: 0, offY: 0, visX: 0, visY: 0, visW: w, visH: h };
+  }
+
+  // -------------------------------------------------------------------------
+  // Confirm crop: cut the dark cut-away out of the preview for real.
+  // -------------------------------------------------------------------------
+  confirmCrop() {
+    if (!this.video.videoWidth) return;
+    if (this.applied) return;
+    this.appliedBox = { ...this.box };
+    this.appliedFull = { w: this.container.clientWidth, h: this.container.clientHeight };
+    this.applied = true;
+    this.cropBox.style.display = 'none';
+    Object.values(this.dims).forEach(d => { d.style.display = 'none'; });
+    this.hideGuides();
+    if (this.onModeChange) this.onModeChange(true);
+    this.updateBadge();
+  }
+
+  editCrop() {
+    if (!this.applied) return;
+    this.applied = false;
+    this.appliedScale = 1;
+    this.container.classList.remove('applied');
+    this.cropBox.style.display = 'block';
+    Object.values(this.dims).forEach(d => { d.style.display = 'block'; });
+    if (this.onModeChange) this.onModeChange(false);
+    this.updateDOM();
+  }
+
+  /**
+   * Applied-mode layout: container becomes the crop window (fitted to the
+   * viewport at the crop's aspect), the video + mask/text layers are scaled
+   * and translated so exactly the cropped region is visible.
+   */
+  layoutApplied(maxW, maxH) {
+    const b = this.appliedBox;
+    const full = this.appliedFull;
+    if (!b || !full) return;
+
+    const aspect = b.w / b.h;
+    let w = maxW;
+    let h = w / aspect;
+    if (h > maxH) { h = maxH; w = h * aspect; }
+    w = Math.max(40, Math.round(w));
+    h = Math.max(40, Math.round(h));
+
+    this.container.style.width = `${w}px`;
+    this.container.style.height = `${h}px`;
+    this.container.style.overflow = 'hidden';
+    this.container.classList.add('applied');
+
+    const scale = w / b.w;
+    this.appliedScale = scale;
+
+    this.video.style.width = `${Math.round(full.w * scale)}px`;
+    this.video.style.height = `${Math.round(full.h * scale)}px`;
+
+    const t = `translate(${-b.x * scale}px, ${-b.y * scale}px)`;
+    this.video.style.transformOrigin = 'top left';
+    this.video.style.transform = t;
+    ['maskStageLayer', 'textStageLayer'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.style.transformOrigin = 'top left';
+        el.style.transform = t;
+      }
+    });
+  }
+
+  clearAppliedLayout() {
+    this.container.classList.remove('applied');
+    this.container.style.overflow = '';
+    this.video.style.transform = '';
+    ['maskStageLayer', 'textStageLayer'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.style.transform = '';
+    });
+  }
+
   setRatio(mode) {
     this.currentRatioMode = mode;
     const map = { '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5, '16:9': 16 / 9, '4:3': 4 / 3 };
     this.ratioValue = map[mode] || null;
 
-    // CapCut behavior: picking a preset drops in the largest centered box of
-    // that ratio, ready to drag.
+    if (this.applied) {
+      // Changing ratio in applied view: jump back to editing with the new box.
+      this.editCrop();
+    }
     if (this.ratioValue) {
       this.fitRatioCentered();
     }
@@ -179,9 +290,13 @@ class CanvasCropper {
 
   onVideoLoaded() {
     if (this.container.clientWidth <= 0 || this.container.clientHeight <= 0) return;
+    this.applied = false;
+    this.appliedBox = null;
+    this.appliedFull = null;
+    this.appliedScale = 1;
+    this.clearAppliedLayout();
     this.cropBox.style.display = 'block';
     Object.values(this.dims).forEach(d => { d.style.display = 'block'; });
-    // Start on the full frame: never silently crop a video the user just loaded.
     this.resetToFull();
   }
 
@@ -200,6 +315,7 @@ class CanvasCropper {
   }
 
   resetToFull() {
+    if (this.applied) this.editCrop();
     this.currentRatioMode = 'free';
     this.ratioValue = null;
     this.ratioCards.forEach(c => c.classList.toggle('active', c.dataset.ratio === 'free'));
@@ -208,7 +324,6 @@ class CanvasCropper {
     this.updateInputs();
   }
 
-  // Snap helpers: edges (0 / max) and center, threshold in container px.
   snapAxis(pos, size, max) {
     const targets = [0, (max - size) / 2, max - size];
     for (const t of targets) {
@@ -250,7 +365,6 @@ class CanvasCropper {
     const { boxX, boxY, boxW, boxH } = this.dragStart;
     const h = this.activeHandle;
 
-    // Anchored resize: the opposite corner/edge stays put (CapCut feel).
     let newX = boxX, newY = boxY, newW = boxW, newH = boxH;
 
     if (h.includes('e')) newW = boxW + dx;
@@ -292,12 +406,12 @@ class CanvasCropper {
   }
 
   updateDOM() {
+    if (this.applied) { this.updateBadge(); return; }
     this.cropBox.style.left = `${this.box.x}px`;
     this.cropBox.style.top = `${this.box.y}px`;
     this.cropBox.style.width = `${this.box.w}px`;
     this.cropBox.style.height = `${this.box.h}px`;
 
-    // Dimmed cut-away: exactly what will be cropped off.
     const cw = this.container.clientWidth;
     const ch = this.container.clientHeight;
     Object.assign(this.dims.top.style, { left: '0px', top: '0px', width: `${cw}px`, height: `${this.box.y}px` });
@@ -319,10 +433,6 @@ class CanvasCropper {
     return { width: w, height: h };
   }
 
-  /**
-   * Show BOTH the crop size and the exact export canvas, so the size on the
-   * badge is the size the downloaded file will have. No more surprise rescale.
-   */
   updateBadge() {
     const c = this.getNativeCoords();
     if (!c) {
@@ -346,10 +456,11 @@ class CanvasCropper {
   }
 
   onManualInputChange() {
+    const basis = this.getBasis();
     const nw = this.video.videoWidth || 1080;
     const nh = this.video.videoHeight || 1920;
-    const scaleX = this.container.clientWidth / nw;
-    const scaleY = this.container.clientHeight / nh;
+    const scaleX = basis.w / nw;
+    const scaleY = basis.h / nh;
 
     this.box.w = (parseInt(this.inputW.value) || 100) * scaleX;
     this.box.h = (parseInt(this.inputH.value) || 100) * scaleY;
@@ -359,27 +470,29 @@ class CanvasCropper {
     this.currentRatioMode = 'free';
     this.ratioValue = null;
     this.ratioCards.forEach(c => c.classList.toggle('active', c.dataset.ratio === 'free'));
+    if (this.applied) this.editCrop();
     this.updateDOM();
   }
 
   /**
-   * Exact pixel crop coordinates in native video space for FFmpeg crop=w:h:x:y
+   * Exact pixel crop coordinates in native video space for FFmpeg crop=w:h:x:y.
+   * Works in both editing and applied (confirmed) mode.
    */
   getNativeCoords() {
     const nw = this.video.videoWidth;
     const nh = this.video.videoHeight;
-    const cw = this.container.clientWidth;
-    const ch = this.container.clientHeight;
+    const basis = this.getBasis();
 
-    if (!nw || !nh || !cw || !ch) return null;
+    if (!nw || !nh || !basis.w || !basis.h) return null;
 
-    const scaleX = nw / cw;
-    const scaleY = nh / ch;
+    const scaleX = nw / basis.w;
+    const scaleY = nh / basis.h;
+    const box = (this.applied && this.appliedBox) ? this.appliedBox : this.box;
 
-    let x = Math.round(this.box.x * scaleX);
-    let y = Math.round(this.box.y * scaleY);
-    let width = Math.round(this.box.w * scaleX);
-    let height = Math.round(this.box.h * scaleY);
+    let x = Math.round(box.x * scaleX);
+    let y = Math.round(box.y * scaleY);
+    let width = Math.round(box.w * scaleX);
+    let height = Math.round(box.h * scaleY);
 
     width = Math.max(2, width - (width % 2));
     height = Math.max(2, height - (height % 2));

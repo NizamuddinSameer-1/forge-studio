@@ -1,11 +1,17 @@
 // ==========================================================================
-// MASK MANAGER (v2.1) - any number of blur / pixelate (mosaic) boxes
+// MASK MANAGER (v2.2) - unlimited blur / pixelate boxes
+// Basis-aware: renders & converts correctly while the crop is applied too.
 // ==========================================================================
 
 class MaskOverlayManager {
-  constructor(container, videoElement) {
+  constructor(container, videoElement, getBasis) {
     this.container = container;
     this.video = videoElement;
+    this.getBasis = getBasis || (() => ({
+      w: container.clientWidth, h: container.clientHeight,
+      scale: 1, offX: 0, offY: 0,
+      visX: 0, visY: 0, visW: container.clientWidth, visH: container.clientHeight,
+    }));
     this.stageLayer = document.getElementById('maskStageLayer');
 
     this.editor = document.getElementById('maskEditor');
@@ -69,14 +75,13 @@ class MaskOverlayManager {
   }
 
   addMask() {
-    const cw = this.container.clientWidth || 300;
-    const ch = this.container.clientHeight || 500;
+    const b = this.getBasis();
     const mask = {
       id: `mask_${this.counter++}`,
-      x: Math.round(cw * 0.32),
-      y: Math.round(ch * 0.06),
-      w: Math.round(cw * 0.36),
-      h: Math.max(28, Math.round(ch * 0.07)),
+      x: Math.round(b.visX + b.visW * 0.32),
+      y: Math.round(b.visY + b.visH * 0.06),
+      w: Math.round(b.visW * 0.36),
+      h: Math.max(28, Math.round(b.visH * 0.07)),
       blur: 20,
       mode: 'blur',
       enabled: true,
@@ -117,12 +122,12 @@ class MaskOverlayManager {
 
   startDrag(e, mask) {
     e.stopPropagation();
+    const b = this.getBasis();
+    const sc = b.scale || 1;
     const start = { x: e.clientX, y: e.clientY, boxX: mask.x, boxY: mask.y };
     const move = (ev) => {
-      const maxW = this.container.clientWidth;
-      const maxH = this.container.clientHeight;
-      mask.x = Math.max(0, Math.min(maxW - mask.w, start.boxX + ev.clientX - start.x));
-      mask.y = Math.max(0, Math.min(maxH - mask.h, start.boxY + ev.clientY - start.y));
+      mask.x = Math.max(b.visX, Math.min(b.visX + b.visW - mask.w, start.boxX + (ev.clientX - start.x) / sc));
+      mask.y = Math.max(b.visY, Math.min(b.visY + b.visH - mask.h, start.boxY + (ev.clientY - start.y) / sc));
       this.updateBoxDOM(mask);
     };
     const up = () => {
@@ -136,12 +141,12 @@ class MaskOverlayManager {
 
   startResize(e, mask, handle) {
     e.stopPropagation();
+    const b = this.getBasis();
+    const sc = b.scale || 1;
     const start = { x: e.clientX, y: e.clientY, boxX: mask.x, boxY: mask.y, boxW: mask.w, boxH: mask.h };
     const move = (ev) => {
-      const dx = ev.clientX - start.x;
-      const dy = ev.clientY - start.y;
-      const maxW = this.container.clientWidth;
-      const maxH = this.container.clientHeight;
+      const dx = (ev.clientX - start.x) / sc;
+      const dy = (ev.clientY - start.y) / sc;
 
       let { boxX: x, boxY: y, boxW: w, boxH: h } = start;
       if (handle.includes('e')) w = start.boxW + dx;
@@ -150,10 +155,10 @@ class MaskOverlayManager {
       if (handle.includes('n')) { h = start.boxH - dy; y = start.boxY + dy; }
 
       if (w < 20 || h < 20) return;
-      if (x < 0) { w += x; x = 0; }
-      if (y < 0) { h += y; y = 0; }
-      if (x + w > maxW) w = maxW - x;
-      if (y + h > maxH) h = maxH - y;
+      if (x < b.visX) { w -= (b.visX - x); x = b.visX; }
+      if (y < b.visY) { h -= (b.visY - y); y = b.visY; }
+      if (x + w > b.visX + b.visW) w = b.visX + b.visW - x;
+      if (y + h > b.visY + b.visH) h = b.visY + b.visH - y;
 
       mask.x = x; mask.y = y; mask.w = w; mask.h = h;
       this.updateBoxDOM(mask);
@@ -170,12 +175,14 @@ class MaskOverlayManager {
   updateBoxDOM(mask) {
     const el = mask.el;
     if (!el) return;
-    el.style.left = `${mask.x}px`;
-    el.style.top = `${mask.y}px`;
-    el.style.width = `${mask.w}px`;
-    el.style.height = `${mask.h}px`;
-    el.style.backdropFilter = `blur(${mask.blur}px)`;
-    el.style.webkitBackdropFilter = `blur(${mask.blur}px)`;
+    const b = this.getBasis();
+    const sc = b.scale || 1;
+    el.style.left = `${mask.x * sc - b.offX}px`;
+    el.style.top = `${mask.y * sc - b.offY}px`;
+    el.style.width = `${mask.w * sc}px`;
+    el.style.height = `${mask.h * sc}px`;
+    el.style.backdropFilter = `blur(${Math.max(1, mask.blur * sc)}px)`;
+    el.style.webkitBackdropFilter = `blur(${Math.max(1, mask.blur * sc)}px)`;
     el.classList.toggle('pixelate', mask.mode === 'pixelate');
     el.classList.toggle('selected', mask.id === this.activeId);
     const tag = el.querySelector('.mask-box-tag');
@@ -226,13 +233,12 @@ class MaskOverlayManager {
   setPosition(pos) {
     const m = this.getActive();
     if (!m) return;
-    const cw = this.container.clientWidth;
-    const ch = this.container.clientHeight;
+    const b = this.getBasis();
     const pad = 20;
-    if (pos === 'tr') { m.x = cw - m.w - pad; m.y = pad; }
-    else if (pos === 'br') { m.x = cw - m.w - pad; m.y = ch - m.h - pad; }
-    else if (pos === 'tl') { m.x = pad; m.y = pad; }
-    else if (pos === 'bl') { m.x = pad; m.y = ch - m.h - pad; }
+    if (pos === 'tr') { m.x = b.visX + b.visW - m.w - pad; m.y = b.visY + pad; }
+    else if (pos === 'br') { m.x = b.visX + b.visW - m.w - pad; m.y = b.visY + b.visH - m.h - pad; }
+    else if (pos === 'tl') { m.x = b.visX + pad; m.y = b.visY + pad; }
+    else if (pos === 'bl') { m.x = b.visX + pad; m.y = b.visY + b.visH - m.h - pad; }
     this.updateBoxDOM(m);
     this.updateInputs();
   }
@@ -240,25 +246,23 @@ class MaskOverlayManager {
   updateInputs() {
     const m = this.getActive();
     if (!m) return;
+    const b = this.getBasis();
     const nw = this.video.videoWidth || 1080;
     const nh = this.video.videoHeight || 1920;
-    const cw = this.container.clientWidth || 1;
-    const ch = this.container.clientHeight || 1;
-    this.inputW.value = Math.round(m.w * (nw / cw));
-    this.inputH.value = Math.round(m.h * (nh / ch));
-    this.inputX.value = Math.round(m.x * (nw / cw));
-    this.inputY.value = Math.round(m.y * (nh / ch));
+    this.inputW.value = Math.round(m.w * (nw / b.w));
+    this.inputH.value = Math.round(m.h * (nh / b.h));
+    this.inputX.value = Math.round(m.x * (nw / b.w));
+    this.inputY.value = Math.round(m.y * (nh / b.h));
   }
 
   onManualInput() {
     const m = this.getActive();
     if (!m) return;
+    const b = this.getBasis();
     const nw = this.video.videoWidth || 1080;
     const nh = this.video.videoHeight || 1920;
-    const cw = this.container.clientWidth || 1;
-    const ch = this.container.clientHeight || 1;
-    const scaleX = cw / nw;
-    const scaleY = ch / nh;
+    const scaleX = b.w / nw;
+    const scaleY = b.h / nh;
     m.w = (parseInt(this.inputW.value) || 100) * scaleX;
     m.h = (parseInt(this.inputH.value) || 50) * scaleY;
     m.x = (parseInt(this.inputX.value) || 0) * scaleX;
@@ -291,12 +295,11 @@ class MaskOverlayManager {
   getNativeMasks(cropNative) {
     const nw = this.video.videoWidth;
     const nh = this.video.videoHeight;
-    const cw = this.container.clientWidth;
-    const ch = this.container.clientHeight;
-    if (!nw || !nh || !cw || !ch) return [];
+    const b = this.getBasis();
+    if (!nw || !nh || !b.w || !b.h) return [];
 
-    const scaleX = nw / cw;
-    const scaleY = nh / ch;
+    const scaleX = nw / b.w;
+    const scaleY = nh / b.h;
     const cropX = cropNative ? cropNative.x : 0;
     const cropY = cropNative ? cropNative.y : 0;
     const cropW = cropNative ? cropNative.width : nw;
