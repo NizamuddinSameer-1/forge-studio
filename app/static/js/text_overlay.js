@@ -1,5 +1,6 @@
 // ==========================================================================
-// TEXT OVERLAY & TYPOGRAPHY MANAGER
+// TEXT OVERLAY & TYPOGRAPHY MANAGER (v2.1)
+// Multi-line captions, per-layer start/end timing, draggable on stage.
 // ==========================================================================
 
 class TextOverlayManager {
@@ -27,6 +28,9 @@ class TextOverlayManager {
     this.inputBgColor = document.getElementById('textBgColor');
     this.inputBgOpacity = document.getElementById('textBgOpacity');
 
+    this.inputStart = document.getElementById('textStartInput');
+    this.inputEnd = document.getElementById('textEndInput');
+
     this.btnAlignTop = document.getElementById('btnAlignTextTop');
     this.btnAlignCenter = document.getElementById('btnAlignTextCenter');
     this.btnAlignBottom = document.getElementById('btnAlignTextBottom');
@@ -42,7 +46,6 @@ class TextOverlayManager {
   initEvents() {
     this.btnAdd.addEventListener('click', () => this.addLayer());
 
-    // Editor bindings
     this.inputText.addEventListener('input', (e) => {
       const layer = this.getActiveLayer();
       if (!layer) return;
@@ -110,12 +113,24 @@ class TextOverlayManager {
       this.updateStageElement(layer);
     });
 
-    // Alignment
+    // Timing window (seconds). Empty = whole clip.
+    const bindTiming = (input, key) => {
+      if (!input) return;
+      input.addEventListener('input', (e) => {
+        const layer = this.getActiveLayer();
+        if (!layer) return;
+        const v = e.target.value.trim();
+        layer[key] = v === '' ? null : Math.max(0, parseFloat(v) || 0);
+        this.renderLayersList();
+      });
+    };
+    bindTiming(this.inputStart, 'start');
+    bindTiming(this.inputEnd, 'end');
+
     this.btnAlignTop.addEventListener('click', () => this.alignActive('top'));
     this.btnAlignCenter.addEventListener('click', () => this.alignActive('center'));
     this.btnAlignBottom.addEventListener('click', () => this.alignActive('bottom'));
 
-    // Delete
     this.btnDelete.addEventListener('click', () => this.deleteActive());
   }
 
@@ -137,6 +152,8 @@ class TextOverlayManager {
       bg_enabled: false,
       bg_color: '#000000',
       bg_opacity: 0.7,
+      start: null,
+      end: null,
     };
 
     this.layers.push(newLayer);
@@ -151,7 +168,6 @@ class TextOverlayManager {
     el.id = `stage_${layer.id}`;
     el.dataset.layerId = layer.id;
 
-    // Draggable on stage
     let isDragging = false;
     let startX = 0, startY = 0;
     let initX = 0, initY = 0;
@@ -200,6 +216,7 @@ class TextOverlayManager {
     el.style.fontFamily = layer.font_family;
     el.style.fontSize = `${layer.font_size}px`;
     el.style.color = layer.color;
+    el.style.whiteSpace = 'pre-line';  // multi-line captions preview
 
     if (layer.stroke_width > 0) {
       el.style.webkitTextStroke = `${layer.stroke_width}px ${layer.stroke_color}`;
@@ -224,12 +241,10 @@ class TextOverlayManager {
   selectLayer(id) {
     this.activeLayerId = id;
 
-    // Highlight on stage
     this.stageLayer.querySelectorAll('.text-stage-item').forEach((el) => {
       el.classList.toggle('selected', el.dataset.layerId === id);
     });
 
-    // Populate editor controls
     const layer = this.getActiveLayer();
     if (!layer) {
       this.layerEditor.style.display = 'none';
@@ -250,6 +265,9 @@ class TextOverlayManager {
     this.ctrlBg.style.display = layer.bg_enabled ? 'block' : 'none';
     this.inputBgColor.value = layer.bg_color;
     this.inputBgOpacity.value = layer.bg_opacity;
+
+    if (this.inputStart) this.inputStart.value = layer.start ?? '';
+    if (this.inputEnd) this.inputEnd.value = layer.end ?? '';
 
     this.renderLayersList();
   }
@@ -301,16 +319,19 @@ class TextOverlayManager {
 
   renderLayersList() {
     if (this.layers.length === 0) {
-      this.layersList.innerHTML = '<div class="empty-layers-msg">No text layers yet. Click "Add Text" above.</div>';
+      this.layersList.innerHTML = '<div class="empty-layers-msg">No text layers yet. Click "+ Add Text" above.</div>';
       return;
     }
 
     this.layersList.innerHTML = '';
     this.layers.forEach((layer) => {
+      const timing = (layer.start !== null || layer.end !== null)
+        ? ` ⏱ ${layer.start ?? 0}s→${layer.end ?? 'end'}s`
+        : '';
       const item = document.createElement('div');
       item.className = `text-layer-item ${layer.id === this.activeLayerId ? 'active' : ''}`;
       item.innerHTML = `
-        <span class="layer-item-title">${layer.text || '(Empty text)'}</span>
+        <span class="layer-item-title">${(layer.text || '(Empty text)').split('\n')[0]}${timing}</span>
         <span class="badge">${layer.font_family}</span>
       `;
       item.addEventListener('click', () => this.selectLayer(layer.id));
@@ -319,7 +340,8 @@ class TextOverlayManager {
   }
 
   /**
-   * Returns text layer objects translated into native crop coordinates for FFmpeg
+   * Text layers translated into native crop coordinates for FFmpeg,
+   * including per-layer start/end timing (seconds, null = whole clip).
    */
   getNativeLayers(cropNative) {
     const nw = this.video.videoWidth;
@@ -336,15 +358,10 @@ class TextOverlayManager {
     const cropY = cropNative ? cropNative.y : 0;
 
     return this.layers.map((layer) => {
-      const stageEl = document.getElementById(`stage_${layer.id}`);
-      const renderedFontSize = layer.font_size;
-      const nativeFontSize = Math.round(renderedFontSize * scaleY);
-
-      // Stage element coordinates translated to native video space
+      const nativeFontSize = Math.round(layer.font_size * scaleY);
       const nativeX = Math.round(layer.x * scaleX);
       const nativeY = Math.round(layer.y * scaleY);
 
-      // Relative to crop offset
       const relX = Math.max(0, nativeX - cropX);
       const relY = Math.max(0, nativeY - cropY);
 
@@ -361,6 +378,8 @@ class TextOverlayManager {
         bg_enabled: layer.bg_enabled,
         bg_color: layer.bg_color,
         bg_opacity: layer.bg_opacity,
+        start: layer.start ?? null,
+        end: layer.end ?? null,
       };
     });
   }

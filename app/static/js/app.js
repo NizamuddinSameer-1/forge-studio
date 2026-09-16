@@ -1,5 +1,5 @@
 // ==========================================================================
-// MASTER APP CONTROLLER - FORGE STUDIO
+// MASTER APP CONTROLLER - FORGE STUDIO (v2.1)
 // ==========================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -23,7 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
     hashingEnabled: true,
     engineAvailable: false,
     mlRunnable: false,
-    // The last successful hashing run, plus the exact payload that produced it.
     hashResult: null,
     hashedPayload: null,
     pendingSignature: null,
@@ -179,7 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // A new source invalidates anything hashed from the previous one.
     resetHashState();
 
-    // Show canvas & meta pill, hide empty state
     stageEmptyState.style.display = 'none';
     stageCanvasContainer.style.display = 'block';
     mediaMetaPill.style.display = 'flex';
@@ -189,12 +187,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('metaDuration').textContent = timeline.formatTime(meta.duration);
     document.getElementById('metaFps').textContent = `${meta.fps} fps`;
 
-    // Load video element
     video.src = meta.url;
     video.load();
 
     video.onloadedmetadata = () => {
-      // Scale stage container to fit viewport while maintaining video aspect ratio
       adjustStageSize(meta.width, meta.height);
       canvasCropper.onVideoLoaded();
       timeline.onVideoLoaded(meta.duration);
@@ -226,7 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.meta) {
       adjustStageSize(state.meta.width, state.meta.height);
       canvasCropper.updateDOM();
-      maskOverlay.updateDOM();
+      maskOverlay.updateAllDOM();
     }
   });
 
@@ -273,11 +269,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateHashButton();
   }
 
-  // Stage 1.5 is optional and silently skipped when its deps are missing.
-  // Say so plainly, because several profiles advertise it.
   function renderMlStatus(ml, mlProfileNames) {
     if (!ml) return;
-    mlStatus.style.display = 'block';
+    mlStatus.style.display = 'flex';
     mlStatus.classList.toggle('is-on', ml.runnable);
     mlStatus.classList.toggle('is-off', !ml.runnable);
 
@@ -366,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const trim = timeline.getTrimRange();
     const crop = canvasCropper.getNativeCoords();
     const color = colorGrading.getState();
-    const mask = maskOverlay.getNativeCoords(crop);
+    const masks = maskOverlay.getNativeMasks(crop);
     const textLayers = textOverlay.getNativeLayers(crop);
 
     const seedVal = document.getElementById('hashingSeedInput').value.trim();
@@ -379,13 +373,16 @@ document.addEventListener('DOMContentLoaded', () => {
       trim_end: trim.end,
       crop: crop,
       color_grade: color,
-      mask: mask,
+      masks: masks,
       text_layers: textLayers,
       hashing: {
         enabled: state.hashingEnabled,
         profile: state.hashingProfile,
         seed: seed,
         pad: pad,
+      },
+      export: {
+        resolution: canvasCropper.getExportResolution(),
       },
     };
   }
@@ -437,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
   controlsPanel.addEventListener('change', refreshStaleState);
 
   // --------------------------------------------------------------------------
-  // The hashing step
+  // The hashing step (with exact 3-stage stepper)
   // --------------------------------------------------------------------------
   const exportModal = document.getElementById('exportModal');
   const modalProcessing = document.getElementById('modalProcessingState');
@@ -449,6 +446,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const exportProgressBar = document.getElementById('exportProgressBar');
   const btnCloseModal = document.getElementById('btnCloseModal');
   const btnMinimizeModal = document.getElementById('btnMinimizeModal');
+  const hashStepper = document.getElementById('hashStepper');
 
   function setProgress(pct) {
     if (typeof pct === 'number' && pct > 0) {
@@ -460,14 +458,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function updateStepper(step) {
+    if (!hashStepper || !step) return;
+    hashStepper.querySelectorAll('.hash-step').forEach((el) => {
+      const n = parseInt(el.dataset.step, 10);
+      el.classList.toggle('done', step.current > n || step.label === 'Complete');
+      el.classList.toggle('active', step.current === n && step.label !== 'Complete');
+      if (step.label === 'Complete') el.classList.remove('active');
+    });
+  }
+
+  function resetStepper() {
+    if (!hashStepper) return;
+    hashStepper.querySelectorAll('.hash-step').forEach((el) => {
+      el.classList.remove('done', 'active');
+    });
+  }
+
   btnRunHashing.addEventListener('click', () => runHashing());
   btnCloseModal.addEventListener('click', () => {
     exportModal.style.display = 'none';
     revealHashCard();
   });
 
-  // The result card sits below the profile list, so bring it into view rather
-  // than leaving the user to scroll and wonder whether anything happened.
   function revealHashCard() {
     if (!state.hashResult) return;
     const card = document.getElementById('hashResultCard');
@@ -495,6 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
     modalStageLabel.textContent = 'Queued';
     modalElapsed.textContent = '0.0s';
     setProgress(null);
+    resetStepper();
     terminalLog.innerHTML = '';
   }
 
@@ -567,6 +581,7 @@ document.addEventListener('DOMContentLoaded', () => {
       modalElapsed.textContent = `${data.elapsed.toFixed(1)}s`;
       modalProgressStep.textContent = data.stage || 'Working...';
       setProgress(data.progress);
+      updateStepper(data.step);
 
       if (data.status === 'done') {
         stopPolling();
@@ -584,7 +599,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function logClass(line) {
     if (line.startsWith('[ERR]') || line.includes('[ERR]')) return 'error';
     if (line.startsWith('[!]')) return 'warn';
-    if (line.startsWith('[OK]') || line.includes('[SUCCESS]')) return 'ok';
+    if (line.startsWith('[OK]') || line.includes('[SUCCESS]') || line.startsWith('[STAGE')) return 'ok';
     return 'info';
   }
 
@@ -723,14 +738,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // --------------------------------------------------------------------------
   const btnResetAll = document.getElementById('btnResetAll');
   btnResetAll.addEventListener('click', () => {
-    if (!confirm('Reset all edits, crop, color grading, mask, and text overlays?')) return;
+    if (!confirm('Reset all edits, crop, color grading, masks, and text overlays?')) return;
     colorGrading.reset();
     canvasCropper.resetToFull();
-    if (maskOverlay.enabled) {
-      maskOverlay.toggle.checked = false;
-      maskOverlay.toggle.dispatchEvent(new Event('change'));
-    }
-    // Remove text layers
+    maskOverlay.clearAll();
+    // Reset export size to 1080p
+    document.querySelectorAll('#exportResolution .export-size-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.res === '1080p');
+    });
+    canvasCropper.updateBadge();
     while (textOverlay.layers.length > 0) {
       textOverlay.activeLayerId = textOverlay.layers[0].id;
       textOverlay.deleteActive();
@@ -856,7 +872,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnClearUploads')
     .addEventListener('click', () => clearStorage('uploads', 'uploads', storageUploadsTotal.textContent));
 
-  // Drop back to the empty state when the loaded source is gone.
   function clearLoadedVideo() {
     state.currentFile = null;
     state.meta = null;
