@@ -1,7 +1,7 @@
 /* ==========================================================================
-   FORGE STUDIO v2.1 — additions & overrides (loaded after studio.css)
+   FORGE STUDIO v2.2 — additions & overrides (loaded after studio.css)
    Crop dims/guides, export size card, colour suite extras, mask boxes,
-   text timing, hash stepper.
+   text timing, hash stepper, confirmed-crop mode, desktop/laptop layout.
    ========================================================================== */
 
 /* ---------- Crop: dimmed cut-away + snap guides ---------- */
@@ -64,6 +64,24 @@
   pointer-events: none;
 }
 .crop-badge .export-dims { color: var(--accent-secondary); }
+
+.crop-mode-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+/* ---------- Confirmed-crop (applied) mode ---------- */
+.stage-canvas-container.applied #mainVideo {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.stage-canvas-container.applied .mask-stage-layer,
+.stage-canvas-container.applied .text-stage-layer {
+  overflow: visible;
+}
 
 /* ---------- Export size card ---------- */
 .export-size-card {
@@ -357,3 +375,71 @@
 .stage-canvas-container { position: relative; }
 .text-stage-layer { position: absolute; inset: 0; pointer-events: none; z-index: 9; }
 .text-stage-item { pointer-events: auto; }
+
+/* ==========================================================================
+   DESKTOP / LAPTOP LAYOUT POLISH
+   The studio is a desktop tool first: generous control panel, scrollable
+   tabs, proper scrollbars, and graceful tightening on smaller laptop screens.
+   ========================================================================== */
+.controls-panel {
+  width: 360px;
+  flex-shrink: 0;
+}
+.tool-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.tab-btn { white-space: nowrap; flex-shrink: 0; }
+
+/* Slim dark scrollbars everywhere in the studio chrome */
+.controls-panel::-webkit-scrollbar,
+.tool-tabs::-webkit-scrollbar,
+.terminal-log::-webkit-scrollbar,
+.mask-list::-webkit-scrollbar,
+.text-layers-list::-webkit-scrollbar,
+.storage-list::-webkit-scrollbar,
+.ratio-grid::-webkit-scrollbar {
+  width: 8px;
+  height: 6px;
+}
+.controls-panel::-webkit-scrollbar-thumb,
+.tool-tabs::-webkit-scrollbar-thumb,
+.terminal-log::-webkit-scrollbar-thumb,
+.mask-list::-webkit-scrollbar-thumb,
+.text-layers-list::-webkit-scrollbar-thumb,
+.storage-list::-webkit-scrollbar-thumb,
+.ratio-grid::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 4px;
+}
+.controls-panel::-webkit-scrollbar-track,
+.terminal-log::-webkit-scrollbar-track,
+.storage-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Wider desktop screens: a touch more breathing room */
+@media (min-width: 1600px) {
+  .controls-panel { width: 390px; }
+  .studio-header { padding-left: 28px; padding-right: 28px; }
+}
+
+/* Standard laptops (1366x768 - 1536x864): tighten, never crush */
+@media (max-width: 1400px) {
+  .controls-panel { width: 330px; }
+}
+@media (max-width: 1220px) {
+  .controls-panel { width: 300px; }
+  .tab-btn { font-size: 12px; padding: 8px 10px; }
+  .logo-badge { display: none; }
+}
+@media (max-width: 1024px) {
+  .controls-panel { width: 280px; }
+  .media-meta-pill { display: none !important; }
+  .btn { padding-left: 12px; padding-right: 12px; }
+}
+
+/* Keep the export modal comfortable on laptop screens */
+.modal-card { max-width: min(600px, 94vw); max-height: 92vh; overflow-y: auto; }
+.modal-video-preview video { max-height: 46vh; }

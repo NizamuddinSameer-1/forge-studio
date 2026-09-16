@@ -1,5 +1,5 @@
 // ==========================================================================
-// MASTER APP CONTROLLER - FORGE STUDIO (v2.1)
+// MASTER APP CONTROLLER - FORGE STUDIO (v2.2)
 // ==========================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -8,11 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const stageEmptyState = document.getElementById('stageEmptyState');
   const mediaMetaPill = document.getElementById('mediaMetaPill');
 
-  // Sub-managers
+  // Sub-managers (masks & text share the cropper's coordinate basis so they
+  // stay glued to the content when the crop is confirmed and the stage
+  // re-frames to the cropped view)
   const colorGrading = new ColorGradingManager(video);
   const canvasCropper = new CanvasCropper(stageCanvasContainer, video);
-  const maskOverlay = new MaskOverlayManager(stageCanvasContainer, video);
-  const textOverlay = new TextOverlayManager(stageCanvasContainer, video);
+  const maskOverlay = new MaskOverlayManager(stageCanvasContainer, video, () => canvasCropper.getBasis());
+  const textOverlay = new TextOverlayManager(stageCanvasContainer, video, () => canvasCropper.getBasis());
   const timeline = new TimelineManager(video);
 
   // App State
@@ -204,6 +206,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const maxW = viewportBox.clientWidth - 40;
     const maxH = viewportBox.clientHeight - 40;
 
+    if (canvasCropper.applied) {
+      // Confirmed crop: the stage IS the crop window.
+      canvasCropper.layoutApplied(maxW, maxH);
+      return;
+    }
+
+    canvasCropper.clearAppliedLayout();
+
     let targetW = maxW;
     let targetH = targetW * (nativeH / nativeW);
 
@@ -223,8 +233,42 @@ document.addEventListener('DOMContentLoaded', () => {
       adjustStageSize(state.meta.width, state.meta.height);
       canvasCropper.updateDOM();
       maskOverlay.updateAllDOM();
+      textOverlay.refreshAllDOM();
     }
   });
+
+  // --------------------------------------------------------------------------
+  // Confirm Crop wiring: apply the crop to the stage / jump back to editing
+  // --------------------------------------------------------------------------
+  const btnConfirmCrop = document.getElementById('btnConfirmCrop');
+  const btnEditCrop = document.getElementById('btnEditCrop');
+  const cropModeHint = document.getElementById('cropModeHint');
+
+  canvasCropper.onModeChange = (applied) => {
+    if (state.meta) adjustStageSize(state.meta.width, state.meta.height);
+    maskOverlay.updateAllDOM();
+    textOverlay.refreshAllDOM();
+    if (btnConfirmCrop) btnConfirmCrop.style.display = applied ? 'none' : '';
+    if (btnEditCrop) btnEditCrop.style.display = applied ? '' : 'none';
+    if (cropModeHint) {
+      cropModeHint.textContent = applied
+        ? 'Crop applied — this frame is exactly what exports. Hit Edit Crop to adjust.'
+        : 'Drag the box over the frame — the dimmed area gets cut away — then hit Confirm Crop to see the real result.';
+    }
+  };
+
+  if (btnConfirmCrop) {
+    btnConfirmCrop.addEventListener('click', () => {
+      canvasCropper.confirmCrop();
+      refreshStaleState();
+    });
+  }
+  if (btnEditCrop) {
+    btnEditCrop.addEventListener('click', () => {
+      canvasCropper.editCrop();
+      refreshStaleState();
+    });
+  }
 
   // --------------------------------------------------------------------------
   // Content Hashing Configuration
