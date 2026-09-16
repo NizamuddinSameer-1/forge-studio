@@ -1,130 +1,100 @@
 // ==========================================================================
-// COLOR GRADING & SHARPENING CONTROLLER
+// COLOR GRADING CONTROLLER (v2.1) - full CapCut-style adjust suite
+// Live preview maps each control to the closest CSS equivalent; the export
+// render uses the matching FFmpeg filters 1:1 (see editor_engine.py).
 // ==========================================================================
 
 class ColorGradingManager {
   constructor(videoElement) {
     this.video = videoElement;
-    this.state = {
-      sharpen: 0.0,      // 0.0 to 2.5
-      brightness: 0.0,   // -0.5 to 0.5 (maps to 50% to 150%)
-      contrast: 1.0,     // 0.5 to 1.8
-      saturation: 1.0,   // 0.0 to 2.0
-      temperature: 0.0,  // -0.4 to 0.4 (cool to warm)
+    this.defaults = {
+      brightness: 0, exposure: 0, contrast: 1, saturation: 1,
+      highlights: 0, shadows: 0, temperature: 0, tint: 0,
+      sharpen: 0, fade: 0, vignette: 0, grain: 0,
     };
+    this.state = { ...this.defaults };
+
+    this.fxVignette = document.getElementById('fxVignette');
+    this.fxGrain = document.getElementById('fxGrain');
+
+    this.controls = [
+      { key: 'brightness', slider: 'sliderBrightness', val: 'valBrightness', fmt: v => `${Math.round(v * 100)}%` },
+      { key: 'exposure', slider: 'sliderExposure', val: 'valExposure', fmt: v => v.toFixed(2) },
+      { key: 'contrast', slider: 'sliderContrast', val: 'valContrast', fmt: v => v.toFixed(2) },
+      { key: 'saturation', slider: 'sliderSaturation', val: 'valSaturation', fmt: v => v.toFixed(2) },
+      { key: 'highlights', slider: 'sliderHighlights', val: 'valHighlights', fmt: v => v.toFixed(2) },
+      { key: 'shadows', slider: 'sliderShadows', val: 'valShadows', fmt: v => v.toFixed(2) },
+      { key: 'temperature', slider: 'sliderTemperature', val: 'valTemperature', fmt: v => (v > 0 ? `+${Math.round(v * 100)} (Warm)` : v < 0 ? `${Math.round(v * 100)} (Cool)` : '0') },
+      { key: 'tint', slider: 'sliderTint', val: 'valTint', fmt: v => v.toFixed(2) },
+      { key: 'sharpen', slider: 'sliderSharpen', val: 'valSharpen', fmt: v => v.toFixed(2) },
+      { key: 'fade', slider: 'sliderFade', val: 'valFade', fmt: v => v.toFixed(2) },
+      { key: 'vignette', slider: 'sliderVignette', val: 'valVignette', fmt: v => v.toFixed(2) },
+      { key: 'grain', slider: 'sliderGrain', val: 'valGrain', fmt: v => v.toFixed(2) },
+    ];
 
     this.initUI();
   }
 
   initUI() {
-    this.sliderSharpen = document.getElementById('sliderSharpen');
-    this.sliderBrightness = document.getElementById('sliderBrightness');
-    this.sliderContrast = document.getElementById('sliderContrast');
-    this.sliderSaturation = document.getElementById('sliderSaturation');
-    this.sliderTemperature = document.getElementById('sliderTemperature');
-
-    this.valSharpen = document.getElementById('valSharpen');
-    this.valBrightness = document.getElementById('valBrightness');
-    this.valContrast = document.getElementById('valContrast');
-    this.valSaturation = document.getElementById('valSaturation');
-    this.valTemperature = document.getElementById('valTemperature');
-
-    this.btnReset = document.getElementById('btnResetColorGrading');
-
-    // Attach listeners
-    this.sliderSharpen.addEventListener('input', (e) => {
-      this.state.sharpen = parseFloat(e.target.value);
-      this.valSharpen.textContent = this.state.sharpen.toFixed(2);
-      this.applyPreviewFilters();
+    this.controls.forEach((c) => {
+      const slider = document.getElementById(c.slider);
+      const valEl = document.getElementById(c.val);
+      if (!slider) return;
+      c._slider = slider;
+      c._val = valEl;
+      slider.addEventListener('input', (e) => {
+        this.state[c.key] = parseFloat(e.target.value);
+        if (valEl) valEl.textContent = c.fmt(this.state[c.key]);
+        this.applyPreviewFilters();
+      });
     });
 
-    this.sliderBrightness.addEventListener('input', (e) => {
-      this.state.brightness = parseFloat(e.target.value);
-      const pct = Math.round(this.state.brightness * 100);
-      this.valBrightness.textContent = (pct > 0 ? `+${pct}%` : `${pct}%`);
-      this.applyPreviewFilters();
-    });
-
-    this.sliderContrast.addEventListener('input', (e) => {
-      this.state.contrast = parseFloat(e.target.value);
-      this.valContrast.textContent = this.state.contrast.toFixed(2);
-      this.applyPreviewFilters();
-    });
-
-    this.sliderSaturation.addEventListener('input', (e) => {
-      this.state.saturation = parseFloat(e.target.value);
-      this.valSaturation.textContent = this.state.saturation.toFixed(2);
-      this.applyPreviewFilters();
-    });
-
-    this.sliderTemperature.addEventListener('input', (e) => {
-      this.state.temperature = parseFloat(e.target.value);
-      const tempVal = Math.round(this.state.temperature * 100);
-      this.valTemperature.textContent = tempVal > 0 ? `+${tempVal} (Warm)` : tempVal < 0 ? `${tempVal} (Cool)` : '0';
-      this.applyPreviewFilters();
-    });
-
-    if (this.btnReset) {
-      this.btnReset.addEventListener('click', () => this.reset());
-    }
+    const btnReset = document.getElementById('btnResetColorGrading');
+    if (btnReset) btnReset.addEventListener('click', () => this.reset());
   }
 
   applyPreviewFilters() {
     if (!this.video) return;
+    const s = this.state;
 
-    // CSS filter values:
-    // Brightness: 1.0 + brightness
-    const b = Math.max(0.2, 1.0 + this.state.brightness);
-    const c = this.state.contrast;
-    const s = this.state.saturation;
+    // Luminance stack: brightness + exposure + shadows lift + highlights
+    let brightness = 1 + s.brightness + s.exposure * 0.35 + s.shadows * 0.08 - Math.max(0, s.highlights) * 0.04;
+    let contrast = s.contrast * (1 + s.highlights * 0.08) * (1 - s.fade * 0.12);
+    let saturate = s.saturation * (1 - s.fade * 0.15);
 
-    // Temperature simulation:
-    // Warm: subtle sepia + hue-rotate
+    let filterStr = `brightness(${Math.max(0.2, brightness.toFixed(3))}) contrast(${Math.max(0.2, contrast.toFixed(3))}) saturate(${Math.max(0, saturate.toFixed(3))})`;
+
+    // Temperature: warm = sepia + slight hue shift; cool = hue toward cyan.
+    let hue = 0;
     let sepia = 0;
-    let hueRotate = 0;
-    if (this.state.temperature > 0) {
-      sepia = this.state.temperature * 0.4;
-      hueRotate = -this.state.temperature * 15;
-    } else if (this.state.temperature < 0) {
-      sepia = Math.abs(this.state.temperature) * 0.2;
-      hueRotate = Math.abs(this.state.temperature) * 25; // shifts toward blue/cyan
+    if (s.temperature > 0) {
+      sepia = s.temperature * 0.4;
+      hue = -s.temperature * 15;
+    } else if (s.temperature < 0) {
+      sepia = Math.abs(s.temperature) * 0.2;
+      hue = Math.abs(s.temperature) * 25;
     }
+    // Tint (green <-> magenta): approximate with a small counter hue-rotate.
+    hue += -s.tint * 10;
 
-    let filterStr = `brightness(${b}) contrast(${c}) saturate(${s})`;
-    if (sepia > 0) {
-      filterStr += ` sepia(${sepia}) hue-rotate(${hueRotate}deg)`;
-    }
+    if (sepia > 0 || hue !== 0) filterStr += ` sepia(${sepia.toFixed(3)}) hue-rotate(${hue.toFixed(1)}deg)`;
 
-    // Sharpening simulation via contrast / clarity edge punch
-    if (this.state.sharpen > 0) {
-      const extraContrast = 1 + (this.state.sharpen * 0.08);
-      filterStr += ` contrast(${extraContrast})`;
-    }
+    // Sharpen: crisp edges read as a slight local contrast bump in preview.
+    if (s.sharpen > 0) filterStr += ` contrast(${(1 + s.sharpen * 0.08).toFixed(3)})`;
 
     this.video.style.filter = filterStr;
+
+    // Vignette + grain preview via stage overlays.
+    if (this.fxVignette) this.fxVignette.style.opacity = (s.vignette * 0.85).toFixed(2);
+    if (this.fxGrain) this.fxGrain.style.opacity = (s.grain * 0.4).toFixed(2);
   }
 
   reset() {
-    this.state = {
-      sharpen: 0.0,
-      brightness: 0.0,
-      contrast: 1.0,
-      saturation: 1.0,
-      temperature: 0.0,
-    };
-
-    this.sliderSharpen.value = 0.0;
-    this.sliderBrightness.value = 0.0;
-    this.sliderContrast.value = 1.0;
-    this.sliderSaturation.value = 1.0;
-    this.sliderTemperature.value = 0.0;
-
-    this.valSharpen.textContent = '0.00';
-    this.valBrightness.textContent = '0%';
-    this.valContrast.textContent = '1.00';
-    this.valSaturation.textContent = '1.00';
-    this.valTemperature.textContent = '0';
-
+    this.state = { ...this.defaults };
+    this.controls.forEach((c) => {
+      if (c._slider) c._slider.value = this.defaults[c.key];
+      if (c._val) c._val.textContent = c.fmt(this.defaults[c.key]);
+    });
     this.applyPreviewFilters();
   }
 
