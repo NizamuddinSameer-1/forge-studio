@@ -432,6 +432,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const controlsPanel = document.getElementById('controlsPanel');
   controlsPanel.addEventListener('input', refreshStaleState);
   controlsPanel.addEventListener('change', refreshStaleState);
+  // Canvas drags (crop/mask/text) and export-size clicks don't emit
+  // input/change events - catch them so the stale badge updates instantly.
+  stageCanvasContainer.addEventListener('pointerup', refreshStaleState);
+  const exportResEl = document.getElementById('exportResolution');
+  if (exportResEl) exportResEl.addEventListener('click', refreshStaleState);
 
   // --------------------------------------------------------------------------
   // The hashing step (with exact 3-stage stepper)
@@ -742,7 +747,7 @@ document.addEventListener('DOMContentLoaded', () => {
     colorGrading.reset();
     canvasCropper.resetToFull();
     maskOverlay.clearAll();
-    // Reset export size to 1080p
+    // Reset export size back to 1080p
     document.querySelectorAll('#exportResolution .export-size-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.res === '1080p');
     });
