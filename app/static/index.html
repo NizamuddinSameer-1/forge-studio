@@ -9,11 +9,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/studio.css">
+  <link rel="stylesheet" href="/static/css/studio_v21.css">
 </head>
 <body>
-  <!-- App Container -->
   <div class="app-layout" id="appLayout">
-    
+
     <!-- Top Navigation Header -->
     <header class="studio-header">
       <div class="header-left">
@@ -37,50 +37,27 @@
       </div>
 
       <div class="header-center">
-        <!-- Tab Navigation for Controls -->
         <nav class="tool-tabs" id="toolTabs">
-          <button class="tab-btn active" data-tab="tab-source" id="tabBtnSource">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            Source
-          </button>
-          <button class="tab-btn" data-tab="tab-crop" id="tabBtnCrop">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>
-            Crop & Ratio
-          </button>
-          <button class="tab-btn" data-tab="tab-color" id="tabBtnColor">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 1 0 20v-20z"/></svg>
-            Color & Sharpen
-          </button>
-          <button class="tab-btn" data-tab="tab-mask" id="tabBtnMask">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
-            Mask Blur
-          </button>
-          <button class="tab-btn" data-tab="tab-text" id="tabBtnText">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
-            Text Overlay
-          </button>
-          <button class="tab-btn" data-tab="tab-hashing" id="tabBtnHashing">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></svg>
-            Anti-Detection
-          </button>
+          <button class="tab-btn active" data-tab="tab-source" id="tabBtnSource">⬆ Source</button>
+          <button class="tab-btn" data-tab="tab-crop" id="tabBtnCrop">✂ Crop & Ratio</button>
+          <button class="tab-btn" data-tab="tab-color" id="tabBtnColor">🎨 Color</button>
+          <button class="tab-btn" data-tab="tab-mask" id="tabBtnMask">🎭 Masks</button>
+          <button class="tab-btn" data-tab="tab-text" id="tabBtnText">✍ Text</button>
+          <button class="tab-btn" data-tab="tab-hashing" id="tabBtnHashing">🛡 Anti-Detection</button>
         </nav>
       </div>
 
       <div class="header-right">
-        <button class="btn btn-secondary" id="btnResetAll" title="Reset all edits to defaults">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-          Reset
-        </button>
+        <button class="btn btn-secondary" id="btnResetAll" title="Reset all edits to defaults">↺ Reset</button>
         <button class="btn btn-primary export-btn" id="btnExportVideo">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <span id="btnExportLabel">Export Video</span>
+          ⬇ <span id="btnExportLabel">Export Video</span>
         </button>
       </div>
     </header>
 
     <!-- Main Workspace -->
     <main class="studio-main">
-      
+
       <!-- Left Controls Panel -->
       <aside class="controls-panel" id="controlsPanel">
 
@@ -90,29 +67,20 @@
             <h3 class="section-title">Video Ingestion</h3>
             <p class="section-desc">Import your source video directly from local storage or paste any social media video link.</p>
 
-            <!-- File Dropzone -->
             <div class="dropzone" id="fileDropzone">
               <input type="file" id="fileInput" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" style="display: none;">
-              <div class="dropzone-icon">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              </div>
-              <div class="dropzone-text">
-                <strong>Click to browse</strong> or drag & drop video
-              </div>
+              <div class="dropzone-icon">⬆</div>
+              <div class="dropzone-text"><strong>Click to browse</strong> or drag & drop video</div>
               <span class="dropzone-hint">Supports MP4, MOV, WebM, MKV</span>
             </div>
 
             <div class="separator-text"><span>OR PASTE URL</span></div>
 
-            <!-- URL Downloader -->
             <div class="url-input-group">
               <div class="input-with-icon">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                 <input type="text" id="inputVideoUrl" placeholder="Paste YouTube, Instagram, or TikTok URL...">
               </div>
-              <button class="btn btn-secondary" id="btnFetchUrl">
-                <span>Fetch</span>
-              </button>
+              <button class="btn btn-secondary" id="btnFetchUrl"><span>Fetch</span></button>
             </div>
             <div class="url-loading-indicator" id="urlLoadingIndicator" style="display: none;">
               <div class="spinner"></div>
@@ -130,25 +98,15 @@
             </div>
 
             <div class="storage-totals">
-              <div class="storage-total">
-                <span class="k">Uploads</span>
-                <span class="v" id="storageUploadsTotal">—</span>
-              </div>
-              <div class="storage-total">
-                <span class="k">Outputs</span>
-                <span class="v" id="storageOutputsTotal">—</span>
-              </div>
+              <div class="storage-total"><span class="k">Uploads</span><span class="v" id="storageUploadsTotal">—</span></div>
+              <div class="storage-total"><span class="k">Outputs</span><span class="v" id="storageOutputsTotal">—</span></div>
             </div>
 
             <div class="storage-list-title">Uploads <span class="storage-count" id="storageUploadsCount"></span></div>
-            <div class="storage-list" id="storageUploadsList">
-              <div class="storage-empty">Nothing yet.</div>
-            </div>
+            <div class="storage-list" id="storageUploadsList"><div class="storage-empty">Nothing yet.</div></div>
 
             <div class="storage-list-title">Outputs <span class="storage-count" id="storageOutputsCount"></span></div>
-            <div class="storage-list" id="storageOutputsList">
-              <div class="storage-empty">Nothing yet.</div>
-            </div>
+            <div class="storage-list" id="storageOutputsList"><div class="storage-empty">Nothing yet.</div></div>
 
             <div class="storage-actions">
               <button class="btn btn-secondary btn-xs" id="btnClearOutputs">Clear all outputs</button>
@@ -161,151 +119,99 @@
         <section class="tab-content" id="tab-crop">
           <div class="panel-section">
             <h3 class="section-title">Aspect Ratio & Framing</h3>
-            <p class="section-desc">Pick a preset or drag the visual crop box handles on the canvas for freeform framing.</p>
+            <p class="section-desc">Pick a preset or drag the crop box on the canvas. The box snaps to center and edges, and the dimmed area is exactly what gets cut away.</p>
 
             <div class="ratio-grid" id="ratioGrid">
-              <button class="ratio-card active" data-ratio="free">
-                <div class="ratio-shape ratio-free"></div>
-                <span class="ratio-label">Freeform</span>
-                <span class="ratio-dim">Custom</span>
-              </button>
-              <button class="ratio-card" data-ratio="9:16">
-                <div class="ratio-shape ratio-9-16"></div>
-                <span class="ratio-label">9:16</span>
-                <span class="ratio-dim">Reels / Shorts</span>
-              </button>
-              <button class="ratio-card" data-ratio="1:1">
-                <div class="ratio-shape ratio-1-1"></div>
-                <span class="ratio-label">1:1</span>
-                <span class="ratio-dim">Square</span>
-              </button>
-              <button class="ratio-card" data-ratio="4:5">
-                <div class="ratio-shape ratio-4-5"></div>
-                <span class="ratio-label">4:5</span>
-                <span class="ratio-dim">IG Portrait</span>
-              </button>
-              <button class="ratio-card" data-ratio="16:9">
-                <div class="ratio-shape ratio-16-9"></div>
-                <span class="ratio-label">16:9</span>
-                <span class="ratio-dim">Landscape</span>
-              </button>
-              <button class="ratio-card" data-ratio="4:3">
-                <div class="ratio-shape ratio-4-3"></div>
-                <span class="ratio-label">4:3</span>
-                <span class="ratio-dim">Classic</span>
-              </button>
+              <button class="ratio-card active" data-ratio="free"><div class="ratio-shape ratio-free"></div><span class="ratio-label">Freeform</span><span class="ratio-dim">Custom</span></button>
+              <button class="ratio-card" data-ratio="9:16"><div class="ratio-shape ratio-9-16"></div><span class="ratio-label">9:16</span><span class="ratio-dim">Reels / Shorts</span></button>
+              <button class="ratio-card" data-ratio="1:1"><div class="ratio-shape ratio-1-1"></div><span class="ratio-label">1:1</span><span class="ratio-dim">Square</span></button>
+              <button class="ratio-card" data-ratio="4:5"><div class="ratio-shape ratio-4-5"></div><span class="ratio-label">4:5</span><span class="ratio-dim">IG Portrait</span></button>
+              <button class="ratio-card" data-ratio="16:9"><div class="ratio-shape ratio-16-9"></div><span class="ratio-label">16:9</span><span class="ratio-dim">Landscape</span></button>
+              <button class="ratio-card" data-ratio="4:3"><div class="ratio-shape ratio-4-3"></div><span class="ratio-label">4:3</span><span class="ratio-dim">Classic</span></button>
             </div>
 
             <div class="coord-grid">
-              <div class="coord-field">
-                <label>Width (px)</label>
-                <input type="number" id="cropWidthInput" min="10" step="2">
-              </div>
-              <div class="coord-field">
-                <label>Height (px)</label>
-                <input type="number" id="cropHeightInput" min="10" step="2">
-              </div>
-              <div class="coord-field">
-                <label>Offset X</label>
-                <input type="number" id="cropXInput" min="0" step="2">
-              </div>
-              <div class="coord-field">
-                <label>Offset Y</label>
-                <input type="number" id="cropYInput" min="0" step="2">
-              </div>
+              <div class="coord-field"><label>Width (px)</label><input type="number" id="cropWidthInput" min="10" step="2"></div>
+              <div class="coord-field"><label>Height (px)</label><input type="number" id="cropHeightInput" min="10" step="2"></div>
+              <div class="coord-field"><label>Offset X</label><input type="number" id="cropXInput" min="0" step="2"></div>
+              <div class="coord-field"><label>Offset Y</label><input type="number" id="cropYInput" min="0" step="2"></div>
             </div>
 
             <div class="action-row">
               <button class="btn btn-secondary btn-sm" id="btnCenterCrop">Center Frame</button>
               <button class="btn btn-secondary btn-sm" id="btnResetCrop">Reset Crop</button>
             </div>
+
+            <!-- Export canvas: the exact size the export will have -->
+            <div class="export-size-card">
+              <div class="section-header-flex">
+                <h4 class="subsection-title">Export Size</h4>
+                <span class="export-size-preview" id="cropExportPreview">—</span>
+              </div>
+              <p class="section-desc">The final video is rendered at exactly this canvas — no surprise rescale after hashing.</p>
+              <div class="export-size-options" id="exportResolution">
+                <button class="export-size-btn active" data-res="1080p">1080p <span>Full HD</span></button>
+                <button class="export-size-btn" data-res="720p">720p <span>Smaller file</span></button>
+                <button class="export-size-btn" data-res="source">Source <span>No resize</span></button>
+              </div>
+            </div>
           </div>
         </section>
 
-        <!-- TAB 3: Color Grading & Sharpening -->
+        <!-- TAB 3: Color Grading (full CapCut-style suite) -->
         <section class="tab-content" id="tab-color">
           <div class="panel-section">
             <h3 class="section-title">Color Grading & Detail</h3>
-            <p class="section-desc">Enhance visual fidelity, sharpness, and punch. Changes reflect live on the preview.</p>
+            <p class="section-desc">Full adjust suite. Changes preview live and map 1:1 to the export render.</p>
 
-            <!-- Sharpen Slider -->
+            <div class="slider-control"><div class="slider-header"><label for="sliderBrightness">Brightness</label><span class="slider-val" id="valBrightness">0%</span></div><input type="range" id="sliderBrightness" min="-0.5" max="0.5" step="0.01" value="0"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderExposure">Exposure</label><span class="slider-val" id="valExposure">0</span></div><input type="range" id="sliderExposure" min="-1" max="1" step="0.02" value="0"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderContrast">Contrast</label><span class="slider-val" id="valContrast">1.00</span></div><input type="range" id="sliderContrast" min="0.5" max="1.8" step="0.01" value="1"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderSaturation">Saturation</label><span class="slider-val" id="valSaturation">1.00</span></div><input type="range" id="sliderSaturation" min="0" max="2" step="0.01" value="1"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderHighlights">Highlights</label><span class="slider-val" id="valHighlights">0</span></div><input type="range" id="sliderHighlights" min="-1" max="1" step="0.02" value="0"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderShadows">Shadows</label><span class="slider-val" id="valShadows">0</span></div><input type="range" id="sliderShadows" min="-1" max="1" step="0.02" value="0"></div>
             <div class="slider-control">
-              <div class="slider-header">
-                <label for="sliderSharpen">Sharpen & Clarity</label>
-                <span class="slider-val" id="valSharpen">0.00</span>
-              </div>
-              <input type="range" id="sliderSharpen" min="0" max="2.5" step="0.05" value="0.0">
-              <span class="slider-hint">Subtle luma & chroma unsharp masking for crisp details</span>
+              <div class="slider-header"><label for="sliderTemperature">Temperature</label><span class="slider-val" id="valTemperature">0</span></div>
+              <div class="temp-slider-wrap"><span class="temp-icon">❄️</span><input type="range" id="sliderTemperature" min="-0.4" max="0.4" step="0.01" value="0"><span class="temp-icon">🔥</span></div>
             </div>
-
-            <!-- Brightness -->
-            <div class="slider-control">
-              <div class="slider-header">
-                <label for="sliderBrightness">Brightness</label>
-                <span class="slider-val" id="valBrightness">0%</span>
-              </div>
-              <input type="range" id="sliderBrightness" min="-0.5" max="0.5" step="0.02" value="0.0">
-            </div>
-
-            <!-- Contrast -->
-            <div class="slider-control">
-              <div class="slider-header">
-                <label for="sliderContrast">Contrast</label>
-                <span class="slider-val" id="valContrast">1.00</span>
-              </div>
-              <input type="range" id="sliderContrast" min="0.5" max="1.8" step="0.05" value="1.0">
-            </div>
-
-            <!-- Saturation -->
-            <div class="slider-control">
-              <div class="slider-header">
-                <label for="sliderSaturation">Saturation</label>
-                <span class="slider-val" id="valSaturation">1.00</span>
-              </div>
-              <input type="range" id="sliderSaturation" min="0.0" max="2.0" step="0.05" value="1.0">
-            </div>
-
-            <!-- Temperature -->
-            <div class="slider-control">
-              <div class="slider-header">
-                <label for="sliderTemperature">Color Temperature</label>
-                <span class="slider-val" id="valTemperature">0</span>
-              </div>
-              <div class="temp-slider-wrap">
-                <span class="temp-icon cool">❄️</span>
-                <input type="range" id="sliderTemperature" min="-0.4" max="0.4" step="0.02" value="0.0">
-                <span class="temp-icon warm">🔥</span>
-              </div>
-            </div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderTint">Tint (green ↔ magenta)</label><span class="slider-val" id="valTint">0</span></div><input type="range" id="sliderTint" min="-1" max="1" step="0.02" value="0"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderSharpen">Sharpen & Clarity</label><span class="slider-val" id="valSharpen">0.00</span></div><input type="range" id="sliderSharpen" min="0" max="2.5" step="0.05" value="0"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderFade">Fade (filmic)</label><span class="slider-val" id="valFade">0</span></div><input type="range" id="sliderFade" min="0" max="1" step="0.02" value="0"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderVignette">Vignette</label><span class="slider-val" id="valVignette">0</span></div><input type="range" id="sliderVignette" min="0" max="1" step="0.02" value="0"></div>
+            <div class="slider-control"><div class="slider-header"><label for="sliderGrain">Film Grain</label><span class="slider-val" id="valGrain">0</span></div><input type="range" id="sliderGrain" min="0" max="1" step="0.02" value="0"></div>
 
             <button class="btn btn-secondary btn-sm" id="btnResetColorGrading">Reset Grading</button>
           </div>
         </section>
 
-        <!-- TAB 4: Masking -->
+        <!-- TAB 4: Masks (multiple, blur or pixelate) -->
         <section class="tab-content" id="tab-mask">
           <div class="panel-section">
-            <div class="toggle-header">
+            <div class="section-header-flex">
               <div>
-                <h3 class="section-title">Blur Mask</h3>
-                <p class="section-desc">Obscure logos, usernames, or watermarks with a blurred bounding box.</p>
+                <h3 class="section-title">Masks</h3>
+                <p class="section-desc">Hide logos, handles & watermarks with blur or mosaic boxes. Add as many as you need.</p>
               </div>
-              <label class="switch">
-                <input type="checkbox" id="maskEnableToggle">
-                <span class="slider round"></span>
-              </label>
+              <button class="btn btn-primary btn-sm" id="btnAddMask">+ Add Mask</button>
             </div>
 
-            <div id="maskControlsWrap" class="disabled-wrap">
-              <div class="slider-control">
-                <div class="slider-header">
-                  <label for="sliderMaskBlur">Blur Intensity</label>
-                  <span class="slider-val" id="valMaskBlur">20 px</span>
+            <div class="mask-list" id="maskLayersList"><div class="empty-layers-msg">No masks yet. Click "+ Add Mask".</div></div>
+
+            <div class="mask-editor" id="maskEditor" style="display: none;">
+              <div class="form-group">
+                <label>Mask Style</label>
+                <div class="mode-toggle" id="maskMode">
+                  <button class="mode-btn active" data-mode="blur">🌫 Blur</button>
+                  <button class="mode-btn" data-mode="pixelate">▦ Pixelate</button>
                 </div>
+              </div>
+
+              <div class="slider-control">
+                <div class="slider-header"><label for="sliderMaskBlur">Intensity</label><span class="slider-val" id="valMaskBlur">20 px</span></div>
                 <input type="range" id="sliderMaskBlur" min="5" max="50" step="1" value="20">
               </div>
 
-              <div class="preset-buttons-label">Quick Position Presets:</div>
+              <p class="preset-buttons-label">Quick Position:</p>
               <div class="action-grid-4">
                 <button class="btn btn-secondary btn-xs" id="btnMaskTopRight">Top Right</button>
                 <button class="btn btn-secondary btn-xs" id="btnMaskBottomRight">Bottom Right</button>
@@ -313,107 +219,64 @@
                 <button class="btn btn-secondary btn-xs" id="btnMaskBottomLeft">Bottom Left</button>
               </div>
 
-              <div class="coord-grid" style="margin-top: 14px;">
-                <div class="coord-field">
-                  <label>Mask Width</label>
-                  <input type="number" id="maskWidthInput" min="20" step="2" value="180">
-                </div>
-                <div class="coord-field">
-                  <label>Mask Height</label>
-                  <input type="number" id="maskHeightInput" min="20" step="2" value="80">
-                </div>
-                <div class="coord-field">
-                  <label>Mask X</label>
-                  <input type="number" id="maskXInput" min="0" step="2" value="50">
-                </div>
-                <div class="coord-field">
-                  <label>Mask Y</label>
-                  <input type="number" id="maskYInput" min="0" step="2" value="50">
-                </div>
+              <div class="coord-grid">
+                <div class="coord-field"><label>Width</label><input type="number" id="maskWidthInput"></div>
+                <div class="coord-field"><label>Height</label><input type="number" id="maskHeightInput"></div>
+                <div class="coord-field"><label>X</label><input type="number" id="maskXInput"></div>
+                <div class="coord-field"><label>Y</label><input type="number" id="maskYInput"></div>
               </div>
+
+              <button class="btn btn-danger btn-sm" id="btnDeleteMask">Delete Mask</button>
             </div>
           </div>
         </section>
 
-        <!-- TAB 5: Text Overlay -->
+        <!-- TAB 5: Text Overlays -->
         <section class="tab-content" id="tab-text">
           <div class="panel-section">
-            <div class="section-header-flex">
-              <div>
-                <h3 class="section-title">Text Overlays</h3>
-                <p class="section-desc">Add hooks, captions, or watermarks with custom fonts.</p>
-              </div>
-              <button class="btn btn-primary btn-sm" id="btnAddTextLayer">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Add Text
-              </button>
-            </div>
+            <h3 class="section-title">Text Overlays</h3>
+            <p class="section-desc">Add hooks, captions, or watermarks with custom fonts. Multi-line supported (Enter for a new line).</p>
+            <button class="btn btn-primary btn-sm" id="btnAddTextLayer">+ Add Text</button>
 
-            <!-- Active Text Layer Editor -->
-            <div id="textLayerEditor" style="display: none;">
-              <div class="form-group">
-                <label>Text Content</label>
-                <textarea id="textInputContent" rows="2" placeholder="Enter text overlay..."></textarea>
-              </div>
+            <div class="text-layer-editor" id="textLayerEditor" style="display: none;">
+              <div class="form-group"><label>Text Content</label><textarea id="textInputContent" rows="3"></textarea></div>
 
               <div class="form-row">
                 <div class="form-group flex-1">
                   <label>Font Family</label>
                   <select id="textFontFamily">
-                    <option value="Arial Bold" selected>Arial Bold</option>
-                    <option value="Impact">Impact</option>
-                    <option value="Arial Black">Arial Black</option>
-                    <option value="Arial">Arial Regular</option>
+                    <option>Arial Bold</option>
+                    <option>Impact</option>
+                    <option>Arial Black</option>
+                    <option>Arial Regular</option>
                   </select>
                 </div>
-                <div class="form-group" style="width: 90px;">
-                  <label>Font Size</label>
-                  <input type="number" id="textFontSize" min="14" max="150" value="42">
-                </div>
+                <div class="form-group flex-1"><label>Font Size</label><input type="number" id="textFontSize" value="36"></div>
               </div>
 
               <div class="form-row">
-                <div class="form-group flex-1">
-                  <label>Text Color</label>
-                  <div class="color-picker-wrap">
-                    <input type="color" id="textColorPicker" value="#FFFFFF">
-                    <span id="textColorHex">#FFFFFF</span>
-                  </div>
-                </div>
-                <div class="form-group flex-1">
-                  <label>Outline Color</label>
-                  <div class="color-picker-wrap">
-                    <input type="color" id="textStrokePicker" value="#000000">
-                    <span id="textStrokeHex">#000000</span>
-                  </div>
-                </div>
+                <div class="form-group flex-1"><label>Text Color</label><div class="color-picker-wrap"><input type="color" id="textColorPicker" value="#FFFFFF"><span id="textColorHex">#FFFFFF</span></div></div>
+                <div class="form-group flex-1"><label>Outline Color</label><div class="color-picker-wrap"><input type="color" id="textStrokePicker" value="#000000"><span id="textStrokeHex">#000000</span></div></div>
               </div>
 
               <div class="form-row">
-                <div class="form-group flex-1">
-                  <label>Outline Width</label>
-                  <input type="number" id="textStrokeWidth" min="0" max="12" value="3">
-                </div>
+                <div class="form-group flex-1"><label>Outline Width</label><input type="number" id="textStrokeWidth" value="2" min="0" max="20"></div>
                 <div class="form-group flex-1">
                   <label>Background Box</label>
-                  <div class="checkbox-pill">
-                    <input type="checkbox" id="textBgToggle">
-                    <span>Add Box</span>
-                  </div>
+                  <div class="checkbox-pill"><input type="checkbox" id="textBgToggle"><span>Add Box</span></div>
                 </div>
               </div>
 
-              <div id="textBgControls" style="display: none; margin-bottom: 12px;">
+              <div id="textBgControls" style="display: none;">
                 <div class="form-row">
-                  <div class="form-group flex-1">
-                    <label>Box Color</label>
-                    <input type="color" id="textBgColor" value="#000000">
-                  </div>
-                  <div class="form-group flex-1">
-                    <label>Box Opacity</label>
-                    <input type="range" id="textBgOpacity" min="0.1" max="1.0" step="0.05" value="0.7">
-                  </div>
+                  <div class="form-group flex-1"><label>Box Color</label><input type="color" id="textBgColor" value="#000000"></div>
+                  <div class="form-group flex-1"><label>Box Opacity</label><input type="range" id="textBgOpacity" min="0.1" max="1" step="0.05" value="0.7"></div>
                 </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group flex-1"><label>Show From (s)</label><input type="number" id="textStartInput" min="0" step="0.1" placeholder="0"></div>
+                <div class="form-group flex-1"><label>Hide After (s)</label><input type="number" id="textEndInput" min="0" step="0.1" placeholder="end"></div>
               </div>
 
               <div class="action-row">
@@ -424,119 +287,51 @@
               </div>
             </div>
 
-            <!-- Layer List -->
             <div class="layer-list-wrap">
               <div class="layer-list-title">Layers</div>
-              <div class="text-layers-list" id="textLayersList">
-                <div class="empty-layers-msg">No text layers yet. Click "Add Text" above.</div>
-              </div>
+              <div class="text-layers-list" id="textLayersList"><div class="empty-layers-msg">No text layers yet. Click "+ Add Text" above.</div></div>
             </div>
-
           </div>
         </section>
 
-        <!-- TAB 6: Anti-Detection Hashing (V7 Pipeline) -->
+        <!-- TAB 6: Anti-Detection Hashing -->
         <section class="tab-content" id="tab-hashing">
           <div class="panel-section">
+            <h3 class="section-title">V7 Content Hashing</h3>
+            <p class="section-desc">Applies mathematical perturbations so platform bots detect your video as 100% unique.</p>
+
             <div class="toggle-header">
               <div>
-                <h3 class="section-title">V7 Content Hashing</h3>
-                <p class="section-desc">Applies mathematical perturbations so YouTube/Instagram bots detect it as 100% unique.</p>
+                <h4 class="subsection-title">Enable Hashing</h4>
               </div>
-              <label class="switch">
-                <input type="checkbox" id="hashingEnableToggle" checked>
-                <span class="slider round"></span>
-              </label>
+              <label class="switch"><input type="checkbox" id="hashingEnableToggle" checked><span class="slider round"></span></label>
             </div>
 
             <div id="hashingControlsWrap">
-              <label class="form-label" style="margin-top: 10px;">Select Pipeline Profile:</label>
-              <div class="profile-grid" id="profileGrid">
-                <!-- Populated dynamically from /api/profiles -->
-                <div class="profile-card active" data-profile="BALANCED">
-                  <div class="profile-badge-row">
-                    <span class="profile-name">BALANCED</span>
-                    <span class="badge badge-rec">DEFAULT</span>
-                  </div>
-                  <p class="profile-info">Medium strength. Good balance of duplicate protection and video fidelity.</p>
-                </div>
-                <div class="profile-card" data-profile="SAFE">
-                  <div class="profile-badge-row">
-                    <span class="profile-name">SAFE</span>
-                    <span class="badge">LOW</span>
-                  </div>
-                  <p class="profile-info">Lowest strength. Barely changes anything. Safe against quality loss.</p>
-                </div>
-                <div class="profile-card" data-profile="AGGRESSIVE">
-                  <div class="profile-badge-row">
-                    <span class="profile-name">AGGRESSIVE</span>
-                    <span class="badge badge-high">HIGH</span>
-                  </div>
-                  <p class="profile-info">Stronger perturbations for stubborn duplicate detection.</p>
-                </div>
-                <div class="profile-card" data-profile="AIMIMIC">
-                  <div class="profile-badge-row">
-                    <span class="profile-name">AIMIMIC</span>
-                    <span class="badge badge-high">AI STYLE</span>
-                  </div>
-                  <p class="profile-info">Applies subtle AI-generated aesthetic (bloom, saturation lift).</p>
-                </div>
-                <div class="profile-card" data-profile="TOON">
-                  <div class="profile-badge-row">
-                    <span class="profile-name">TOON</span>
-                    <span class="badge">ANIME</span>
-                  </div>
-                  <p class="profile-info">Optimized for cartoon and anime content specifically.</p>
-                </div>
-                <div class="profile-card" data-profile="MAXIMUM">
-                  <div class="profile-badge-row">
-                    <span class="profile-name">MAXIMUM</span>
-                    <span class="badge badge-max">NUCLEAR</span>
-                  </div>
-                  <p class="profile-info">Maximum perturbations turned to max. Try when other profiles fail.</p>
-                </div>
-              </div>
+              <p class="preset-buttons-label">Select Pipeline Profile:</p>
+              <div class="profile-grid" id="profileGrid"></div>
 
-              <div class="form-group" style="margin-top: 14px;">
+              <div class="form-group">
                 <label>Custom Seed (Optional)</label>
-                <input type="number" id="hashingSeedInput" placeholder="Leave blank for random seed each time">
+                <input type="number" id="hashingSeedInput" placeholder="Random">
                 <span class="slider-hint">Same seed = identical hash generation (useful for testing)</span>
               </div>
 
-              <div class="checkbox-row" style="margin-top: 10px;">
-                <label class="custom-checkbox">
-                  <input type="checkbox" id="hashingPadToggle" checked>
-                  <span class="checkmark"></span>
-                  <span>Behavioral byte padding (random byte buffer)</span>
-                </label>
+              <div class="toggle-header">
+                <div><h4 class="subsection-title">Byte Padding</h4><p class="section-desc">Behavioral byte padding (random byte buffer)</p></div>
+                <label class="switch"><input type="checkbox" id="hashingPadToggle" checked><span class="slider round"></span></label>
               </div>
             </div>
 
-            <!-- Hash engine availability -->
-            <div class="engine-status" id="engineStatus">
-              <span class="engine-dot"></span>
-              <span class="engine-text" id="engineStatusText">Checking hash engine...</span>
-            </div>
-
-            <!-- Optional Stage 1.5 (AI) pass availability -->
+            <div class="engine-status" id="engineStatus"><span id="engineStatusText">Checking hash engine...</span></div>
             <div class="ml-status" id="mlStatus" style="display: none;">
-              <div class="ml-status-head">
-                <span class="ml-status-label">Stage 1.5 (AI pass)</span>
-                <span class="badge" id="mlStatusBadge">—</span>
-              </div>
-              <p class="ml-status-text" id="mlStatusText"></p>
+              <span class="badge" id="mlStatusBadge">—</span>
+              <span id="mlStatusText"></span>
             </div>
 
-            <!-- The hashing step runs here, on demand -->
-            <button class="btn btn-primary btn-hash-run" id="btnRunHashing" disabled>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-              <span id="btnRunHashingLabel">Run Content Hashing</span>
-            </button>
-            <p class="hash-hint" id="hashHint">
-              Renders your edits, then applies the anti-detection pass. Export unlocks afterwards.
-            </p>
+            <button class="btn btn-primary btn-lg hash-run-btn" id="btnRunHashing">⚡ <span id="btnRunHashingLabel">Run Content Hashing</span></button>
+            <p class="hash-hint" id="hashHint">Load a video first, then run the hashing pass here.</p>
 
-            <!-- Result of the last hashing run -->
             <div class="hash-result" id="hashResultCard" style="display: none;">
               <div class="hash-result-head">
                 <span class="hash-result-title">Hashed and ready</span>
@@ -550,142 +345,92 @@
               </div>
               <div class="hash-result-actions">
                 <button class="btn btn-secondary btn-sm" id="btnPreviewHash">Preview</button>
-                <a href="#" class="btn btn-primary btn-sm" id="btnDownloadHash" download>Download</a>
+                <a class="btn btn-primary btn-sm" id="btnDownloadHash" download>Download</a>
               </div>
-              <p class="hash-stale-note" id="hashStaleNote" style="display: none;">
-                Your edits changed since this hash — run it again to refresh.
-              </p>
+              <p class="hash-stale-note" id="hashStaleNote" style="display: none;">Your edits changed since this hash — run it again to refresh.</p>
             </div>
-
           </div>
         </section>
-
       </aside>
 
-      <!-- Center Video Stage -->
-      <section class="video-stage" id="videoStage">
-        
-        <!-- Canvas Viewport Box -->
+      <!-- Center Stage -->
+      <section class="stage-wrap">
         <div class="viewport-box" id="viewportBox">
-          
-          <!-- Empty State (No video loaded) -->
           <div class="stage-empty-state" id="stageEmptyState">
             <div class="empty-icon">🎬</div>
             <h2>No Video Loaded</h2>
             <p>Upload a video or paste a link from YouTube/Instagram to start editing.</p>
-            <div class="empty-buttons">
+            <div class="empty-actions">
               <button class="btn btn-primary" id="btnEmptyBrowse">Browse Local File</button>
               <button class="btn btn-secondary" id="btnEmptyUrl">Paste URL</button>
             </div>
           </div>
 
-          <!-- Video Wrapper with Overlays -->
           <div class="stage-canvas-container" id="stageCanvasContainer" style="display: none;">
-            
-            <!-- Main HTML5 Video -->
-            <video id="mainVideo" preload="auto" playsinline crossOrigin="anonymous"></video>
+            <video id="mainVideo" preload="metadata" playsinline></video>
 
-            <!-- Dimmed Out of Bounds Backdrop -->
-            <div class="crop-backdrop" id="cropBackdrop"></div>
+            <!-- Colour FX preview overlays (vignette / grain) -->
+            <div class="fx-vignette" id="fxVignette"></div>
+            <div class="fx-grain" id="fxGrain"></div>
 
-            <!-- Interactive Crop Bounding Box -->
-            <div class="crop-box" id="cropBox">
-              <div class="crop-grid-lines">
-                <div class="line h-1"></div>
-                <div class="line h-2"></div>
-                <div class="line v-1"></div>
-                <div class="line v-2"></div>
-              </div>
+            <!-- Crop dim regions + snap guides are created by canvas_cropper.js -->
+            <div class="crop-box" id="cropBox" style="display: none;">
               <div class="crop-badge" id="cropBadge">9:16</div>
-              <!-- 8 Resize Handles -->
-              <div class="handle handle-nw" data-handle="nw"></div>
-              <div class="handle handle-n" data-handle="n"></div>
-              <div class="handle handle-ne" data-handle="ne"></div>
-              <div class="handle handle-e" data-handle="e"></div>
-              <div class="handle handle-se" data-handle="se"></div>
-              <div class="handle handle-s" data-handle="s"></div>
-              <div class="handle handle-sw" data-handle="sw"></div>
-              <div class="handle handle-w" data-handle="w"></div>
+              <div class="handle" data-handle="nw"></div>
+              <div class="handle" data-handle="n"></div>
+              <div class="handle" data-handle="ne"></div>
+              <div class="handle" data-handle="e"></div>
+              <div class="handle" data-handle="se"></div>
+              <div class="handle" data-handle="s"></div>
+              <div class="handle" data-handle="sw"></div>
+              <div class="handle" data-handle="w"></div>
             </div>
 
-            <!-- Interactive Blur Mask Box -->
-            <div class="mask-box" id="maskBox" style="display: none;">
-              <div class="mask-label">Blur Mask</div>
-              <div class="mask-handle mask-handle-se" data-handle="se"></div>
-            </div>
+            <!-- Mask boxes are created dynamically by mask_overlay.js -->
+            <div class="mask-stage-layer" id="maskStageLayer"></div>
 
-            <!-- Draggable Text Layers Container -->
+            <!-- Text layers -->
             <div class="text-stage-layer" id="textStageLayer"></div>
-
           </div>
-
         </div>
 
-        <!-- Bottom Timeline Control Bar -->
-        <footer class="timeline-bar" id="timelineBar">
-          <div class="timeline-controls-left">
-            <button class="ctrl-btn" id="btnPlayPause" title="Play / Pause (Space)">
-              <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <svg id="pauseIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        <!-- Timeline / Transport -->
+        <footer class="timeline-footer">
+          <div class="transport-controls">
+            <button class="transport-btn" id="btnStepBack" title="Step back 1s">⏮</button>
+            <button class="transport-btn play-btn" id="btnPlayPause">
+              <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21"/></svg>
+              <svg id="pauseIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="5" y="4" width="4" height="16"/><rect x="15" y="4" width="4" height="16"/></svg>
             </button>
-            <button class="ctrl-btn" id="btnStepBack" title="Step -1s">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
-            </button>
-            <button class="ctrl-btn" id="btnStepForward" title="Step +1s">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
-            </button>
-            <div class="timecode-display">
-              <span id="timeCurrent">00:00.00</span>
-              <span class="time-sep">/</span>
-              <span id="timeTotal">00:00.00</span>
-            </div>
+            <button class="transport-btn" id="btnStepForward" title="Step forward 1s">⏭</button>
           </div>
 
-          <!-- Trimmer Slider Track -->
+          <div class="time-display"><span id="timeCurrent">00:00.00</span><span class="time-sep">/</span><span id="timeTotal">00:00.00</span></div>
+
           <div class="timeline-track-wrap" id="timelineTrackWrap">
-            <div class="timeline-ruler" id="timelineRuler"></div>
             <div class="timeline-track" id="timelineTrack">
-              <!-- Inactive Dimmed Regions -->
-              <div class="trim-dim trim-dim-left" id="trimDimLeft"></div>
-              <div class="trim-dim trim-dim-right" id="trimDimRight"></div>
-
-              <!-- Active Highlighted Trim Selection -->
-              <div class="trim-active-region" id="trimActiveRegion">
-                <!-- Left In-Handle -->
-                <div class="trim-handle trim-handle-left" id="trimHandleLeft" title="Drag to trim start">
-                  <div class="handle-bar"></div>
-                  <span class="handle-tag" id="inPointTag">IN: 0.0s</span>
-                </div>
-                <!-- Right Out-Handle -->
-                <div class="trim-handle trim-handle-right" id="trimHandleRight" title="Drag to trim end">
-                  <div class="handle-bar"></div>
-                  <span class="handle-tag" id="outPointTag">OUT: 0.0s</span>
-                </div>
-              </div>
-
-              <!-- Playhead Scrubber -->
-              <div class="timeline-playhead" id="timelinePlayhead">
-                <div class="playhead-knob"></div>
-                <div class="playhead-line"></div>
-              </div>
+              <div class="trim-dim left" id="trimDimLeft"></div>
+              <div class="trim-dim right" id="trimDimRight"></div>
+              <div class="trim-active-region" id="trimActiveRegion"></div>
+              <div class="timeline-playhead" id="timelinePlayhead"></div>
+              <div class="trim-handle left" id="trimHandleLeft"><div class="trim-handle-tag" id="inPointTag">IN: 0.0s</div></div>
+              <div class="trim-handle right" id="trimHandleRight"><div class="trim-handle-tag" id="outPointTag">OUT: 0.0s</div></div>
             </div>
           </div>
 
-          <div class="timeline-controls-right">
-            <button class="btn btn-secondary btn-xs" id="btnSetInPoint" title="Set In Point to Current Time">Set In</button>
-            <button class="btn btn-secondary btn-xs" id="btnSetOutPoint" title="Set Out Point to Current Time">Set Out</button>
-            <button class="btn btn-secondary btn-xs" id="btnResetTrim" title="Reset Trim">Full</button>
+          <div class="trim-actions">
+            <button class="btn btn-secondary btn-xs" id="btnSetInPoint">Set In</button>
+            <button class="btn btn-secondary btn-xs" id="btnSetOutPoint">Set Out</button>
+            <button class="btn btn-secondary btn-xs" id="btnResetTrim">Full</button>
           </div>
         </footer>
-
       </section>
-
     </main>
 
     <!-- Export & Progress Modal -->
     <div class="modal-backdrop" id="exportModal" style="display: none;">
       <div class="modal-card">
-        
+
         <!-- Processing State -->
         <div class="modal-state" id="modalProcessingState">
           <div class="modal-spinner-wrap">
@@ -695,21 +440,22 @@
           <h2 class="modal-title" id="modalProcessingTitle">Hashing Your Video</h2>
           <p class="modal-subtitle" id="modalProgressStep">Starting the hashing engine...</p>
 
-          <div class="progress-bar-wrap">
-            <div class="progress-bar-fill indeterminate" id="exportProgressBar"></div>
+          <!-- Exact pipeline stepper -->
+          <div class="hash-stepper" id="hashStepper">
+            <div class="hash-step" data-step="1"><span class="hash-step-dot"></span><span class="hash-step-label">Render edits</span></div>
+            <div class="hash-step" data-step="2"><span class="hash-step-dot"></span><span class="hash-step-label">V7 hash encode</span></div>
+            <div class="hash-step" data-step="3"><span class="hash-step-dot"></span><span class="hash-step-label">Finalize</span></div>
           </div>
+
+          <div class="progress-bar-wrap"><div class="progress-bar-fill indeterminate" id="exportProgressBar"></div></div>
           <div class="modal-progress-meta">
             <span id="modalStageLabel">Queued</span>
             <span class="modal-elapsed" id="modalElapsed">0.0s</span>
           </div>
 
-          <div class="terminal-log" id="terminalLog">
-            <div class="log-line info">[INIT] Initializing pipeline...</div>
-          </div>
+          <div class="terminal-log" id="terminalLog"><div class="log-line info">[INIT] Initializing pipeline...</div></div>
 
-          <button class="btn btn-secondary btn-sm modal-bg-btn" id="btnMinimizeModal">
-            Continue in background
-          </button>
+          <button class="btn btn-secondary btn-sm modal-bg-btn" id="btnMinimizeModal">Continue in background</button>
         </div>
 
         <!-- Success State -->
@@ -720,41 +466,18 @@
           <h2 class="modal-title" id="modalSuccessTitle">Export Complete!</h2>
           <p class="modal-subtitle" id="modalSuccessSubtitle">Your unique, repurposed video is ready for upload.</p>
 
-          <!-- Metrics Box -->
           <div class="metrics-card">
-            <div class="metric-row">
-              <span class="metric-label">Content Hashing</span>
-              <span class="badge badge-success" id="resHashStatus">CHANGED ✅</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">Profile Used</span>
-              <span class="metric-val" id="resProfileUsed">BALANCED</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">Resolution</span>
-              <span class="metric-val" id="resDimensions">1080 × 1920</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">Duration</span>
-              <span class="metric-val" id="resDuration">15.2s</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-label">File Size</span>
-              <span class="metric-val" id="resFileSize">12.4 MB</span>
-            </div>
+            <div class="metric-row"><span class="metric-label">Content Hashing</span><span class="badge badge-success" id="resHashStatus">CHANGED ✅</span></div>
+            <div class="metric-row"><span class="metric-label">Profile Used</span><span class="metric-val" id="resProfileUsed">BALANCED</span></div>
+            <div class="metric-row"><span class="metric-label">Resolution</span><span class="metric-val" id="resDimensions">1080 × 1920</span></div>
+            <div class="metric-row"><span class="metric-label">Duration</span><span class="metric-val" id="resDuration">15.2s</span></div>
+            <div class="metric-row"><span class="metric-label">File Size</span><span class="metric-val" id="resFileSize">12.4 MB</span></div>
           </div>
 
-          <!-- Video Preview -->
-          <div class="modal-video-preview">
-            <video id="modalOutputVideo" controls preload="metadata"></video>
-          </div>
+          <div class="modal-video-preview"><video id="modalOutputVideo" controls preload="metadata"></video></div>
 
-          <!-- Actions -->
           <div class="modal-action-row">
-            <a href="#" class="btn btn-primary btn-lg" id="btnDownloadExport" download>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              <span>Download MP4</span>
-            </a>
+            <a href="#" class="btn btn-primary btn-lg" id="btnDownloadExport" download>⬇ <span>Download MP4</span></a>
             <button class="btn btn-secondary" id="btnCloseModal">Back to Studio</button>
           </div>
         </div>
@@ -764,10 +487,8 @@
 
     <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
-
   </div>
 
-  <!-- Scripts -->
   <script src="/static/js/color_grading.js"></script>
   <script src="/static/js/canvas_cropper.js"></script>
   <script src="/static/js/mask_overlay.js"></script>
