@@ -138,9 +138,12 @@
             </div>
 
             <div class="action-row">
-              <button class="btn btn-secondary btn-sm" id="btnCenterCrop">Center Frame</button>
-              <button class="btn btn-secondary btn-sm" id="btnResetCrop">Reset Crop</button>
+              <button class="btn btn-primary btn-sm" id="btnConfirmCrop">✓ Confirm Crop</button>
+              <button class="btn btn-secondary btn-sm" id="btnEditCrop" style="display: none;">✎ Edit Crop</button>
+              <button class="btn btn-secondary btn-sm" id="btnCenterCrop">Center</button>
+              <button class="btn btn-secondary btn-sm" id="btnResetCrop">Reset</button>
             </div>
+            <p class="crop-mode-hint" id="cropModeHint">Drag the box over the frame — the dimmed area gets cut away — then hit Confirm Crop to see the real result.</p>
 
             <!-- Export canvas: the exact size the export will have -->
             <div class="export-size-card">
