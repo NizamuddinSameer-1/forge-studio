@@ -5,8 +5,6 @@ import random
 from dataclasses import dataclass
 
 from v7_pipeline.config import (
-    DOWNSCALE_H,
-    DOWNSCALE_W,
     GOP_INTERVAL,
     MV_X264_PARAMS_A,
     MV_X264_PARAMS_B,
@@ -279,13 +277,21 @@ def build_filter_complex(
     profile: Profile,
     rp: RandomParams,
     *,
+    scale_to: tuple[int, int] | None = None,
     include_audio: bool = True,
     simple_audio: bool = False,
 ) -> tuple[str, list[str]]:
     """Build video+audio filter_complex and optional extra lavfi inputs.
-    Pass include_audio=False to drop the audio branch (e.g. corrupt source audio).
+
+    scale_to=(w, h) forces an exact output canvas (CLI auto mode, computed in
+    stage1 with even rounding). scale_to=None keeps the input dimensions
+    untouched (studio mode — the editor already rendered the exact export
+    canvas; the old forced rescale upscaled user crops and its /10*10 blur
+    border chain truncated 1080x1920 to 1280x2270, drifting off 9:16).
+    Pass include_audio=False to drop the audio branch (e.g. corrupt source).
     Pass simple_audio=True to use only the base pitch/EQ/comb chain (drops
-    afftfilt/ultrasonic/phase-invert — the NaN-prone filters) as a safe retry."""
+    afftfilt/ultrasonic/phase-invert — the NaN-prone filters) as a safe retry.
+    """
     rr = rp.rotation * 3.14159 / 180
     bilinear_str = f"bilinear={profile.rotation_bilinear}"
     pan_off = profile.pan_offset_px
@@ -293,12 +299,22 @@ def build_filter_complex(
 
     vf_parts: list[str] = []
 
-    vf_parts.append(
-        f"scale='if(gt(iw,ih),-2,{DOWNSCALE_W})':'if(gt(iw,ih),{DOWNSCALE_H},-2)'"
-        f":flags=bicubic,split=2[bg_stream][fg_stream]"
-    )
+    if scale_to is not None:
+        out_w, out_h = scale_to
+        vf_parts.append(
+            f"scale={out_w}:{out_h}:flags=bicubic,split=2[bg_stream][fg_stream]"
+        )
+        bg_down_w = max(2, out_w // 10)
+        bg_down_h = max(2, out_h // 10)
+        bg_chain = f"[bg_stream]scale={bg_down_w}:{bg_down_h}"
+        bg_up = f"scale={out_w}:{out_h}:flags=bicubic"
+    else:
+        # No rescale: blur border derives from the untouched frame. Dimensions
+        # stay exact because the studio always emits even-sized canvases.
+        vf_parts.append("split=2[bg_stream][fg_stream]")
+        bg_chain = "[bg_stream]scale=iw/10:ih/10"
+        bg_up = "scale=iw*10:ih*10:flags=bicubic"
 
-    bg_chain = "[bg_stream]scale=iw/10:ih/10"
     # GUARD: two minterpolates in one filter_complex deadlock ffmpeg's frame
     # buffer (bg optical-flow + toon_cadence). Never stack them.
     if profile.ai_optical_flow and not profile.toon_cadence:
@@ -306,10 +322,7 @@ def build_filter_complex(
         bg_chain += (
             ",minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
         )
-    bg_chain += (
-        ",boxblur=luma_radius=4:luma_power=1,scale=iw*10:ih*10:flags=bicubic"
-        "[blurred_border_bg]"
-    )
+    bg_chain += f",boxblur=luma_radius=4:luma_power=1,{bg_up}[blurred_border_bg]"
     vf_parts.append(bg_chain)
 
     fg_chain = f"[fg_stream]lenscorrection=k1={rp.warp}:k2=0.001"
@@ -352,14 +365,19 @@ def build_filter_complex(
     if rp.use_pan:
         pan_w = rp.crop
         pan_h = rp.crop
+        # trunc-to-even keeps the pan-cropped foreground yuv420p-legal even
+        # when the incoming frame has odd dimensions (e.g. an 855x665 crop),
+        # which used to hard-fail the format conversion downstream.
         fg_chain += (
-            f",crop=iw*{pan_w}:ih*{pan_h}:"
-            f"(iw-iw*{pan_w})/2+{pan_off}*sin(t*{pan_freq}):"
-            f"(ih-ih*{pan_h})/2+{pan_off}*sin(t*{pan_freq})"
+            f",crop='trunc(iw*{pan_w}/2)*2':'trunc(ih*{pan_h}/2)*2':"
+            f"'(iw-ow)/2+{pan_off}*sin(t*{pan_freq})':"
+            f"'(ih-oh)/2+{pan_off}*sin(t*{pan_freq})'"
         )
     else:
-        half = (1 - rp.crop) / 2
-        fg_chain += f",crop=iw*{rp.crop}:ih*{rp.crop}:iw*{half}:ih*{half}"
+        fg_chain += (
+            f",crop='trunc(iw*{rp.crop}/2)*2':'trunc(ih*{rp.crop}/2)*2':"
+            "'(iw-ow)/2':'(ih-oh)/2'"
+        )
 
     fg_chain += (
         ",gblur=sigma=0.5"
@@ -412,6 +430,7 @@ def build_filter_complex(
         )
 
     fg_chain += ",format=yuv420p[sharp_foreground_fg]"
+
     vf_parts.append(fg_chain)
 
     vf_parts.append(
