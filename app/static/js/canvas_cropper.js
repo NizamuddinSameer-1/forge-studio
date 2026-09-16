@@ -1,8 +1,7 @@
 // ==========================================================================
-// INTERACTIVE CANVAS CROPPER & ASPECT RATIO MANAGER (v2.2)
-// CapCut-style: dimmed cut-away, snapping, anchored handles, auto-center,
-// live export badge — plus CONFIRM CROP: applies the crop so the stage
-// shows exactly what will export (the cut-away area is removed from view).
+// INTERACTIVE CANVAS CROPPER & ASPECT RATIO MANAGER (v2.3)
+// Confirm Crop applies the crop to the stage. Canvas Aspect control applies
+// a ratio (9:16 etc.) to the whole canvas, Fill (crop) or Fit (blur bars).
 // ==========================================================================
 
 const EXPORT_CANVASES = {
@@ -12,10 +11,22 @@ const EXPORT_CANVASES = {
   '4:3': { '1080p': [1440, 1080], '720p': [960, 720] },
   '16:9': { '1080p': [1920, 1080], '720p': [1280, 720] },
 };
+const ASPECTS = { '9:16': [9, 16], '4:5': [4, 5], '1:1': [1, 1], '4:3': [4, 3], '16:9': [16, 9] };
 
-function resolveExportCanvas(cw, ch, res) {
-  if (res === 'source') return [Math.max(2, cw - (cw % 2)), Math.max(2, ch - (ch % 2))];
-  if (res !== '1080p' && res !== '720p') res = '1080p';
+function evenFloor(v) { v = Math.max(2, Math.round(v)); return v - (v % 2); }
+
+function resolveExportCanvas(cw, ch, res, aspect) {
+  res = (res === '720p' || res === 'source') ? res : '1080p';
+  if (res === 'source') {
+    if (ASPECTS[aspect]) {
+      const [rw, rh] = ASPECTS[aspect];
+      const r2 = rw / rh;
+      if (cw / Math.max(1, ch) > r2) return [evenFloor(cw), evenFloor(cw / r2)];
+      return [evenFloor(ch * r2), evenFloor(ch)];
+    }
+    return [evenFloor(cw), evenFloor(ch)];
+  }
+  if (ASPECTS[aspect]) return EXPORT_CANVASES[aspect][res];
   const r = cw / Math.max(1, ch);
   let bucket;
   if (r < 0.65) bucket = '9:16';
@@ -45,19 +56,23 @@ class CanvasCropper {
 
     this.exportBtns = document.querySelectorAll('#exportResolution .export-size-btn');
     this.exportPreview = document.getElementById('cropExportPreview');
+    this.fitBtns = document.querySelectorAll('#canvasFit .mode-btn');
 
     this.currentRatioMode = 'free';
     this.ratioValue = null;
 
-    // Crop box in container pixel space: { x, y, w, h }
+    // Canvas & export state
+    this.exportAspect = 'auto';   // 'auto' | '9:16' | '4:5' | '1:1' | '4:3' | '16:9'
+    this.exportFit = 'cover';     // 'cover' (Fill/crop) | 'contain' (Fit/blur bars)
+
     this.box = { x: 0, y: 0, w: 100, h: 100 };
 
     // Confirm-crop ("applied") state
     this.applied = false;
-    this.appliedBox = null;   // crop rect in full-frame container px
-    this.appliedFull = null;  // { w, h } full-frame container px at apply time
-    this.appliedScale = 1;    // container px per full-frame px in applied view
-    this.onModeChange = null; // app.js wires the stage layout + buttons
+    this.appliedBox = null;
+    this.appliedFull = null;
+    this.appliedScale = 1;
+    this.onModeChange = null;
 
     this.isDragging = false;
     this.isResizing = false;
@@ -96,6 +111,15 @@ class CanvasCropper {
       btn.addEventListener('click', () => {
         this.exportBtns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+        this.updateBadge();
+      });
+    });
+
+    this.fitBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.fitBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.exportFit = btn.dataset.fit;
         this.updateBadge();
       });
     });
@@ -154,13 +178,15 @@ class CanvasCropper {
     return active ? active.dataset.res : '1080p';
   }
 
-  // -------------------------------------------------------------------------
-  // Coordinate basis shared by masks & text.
-  //   w/h    = full-frame container px (for native video conversion)
-  //   scale  = screen px per model px (1 while editing)
-  //   offX/Y = screen offset of the model origin (0 while editing)
-  //   vis*   = visible rect in MODEL px (the crop window when applied)
-  // -------------------------------------------------------------------------
+  /** The export/canvas config sent to the backend for the final render. */
+  getExportConfig() {
+    return {
+      resolution: this.getExportResolution(),
+      aspect: this.exportAspect,
+      fit: this.exportFit,
+    };
+  }
+
   getBasis() {
     if (this.applied && this.appliedBox && this.appliedFull) {
       return {
@@ -181,11 +207,10 @@ class CanvasCropper {
   }
 
   // -------------------------------------------------------------------------
-  // Confirm crop: cut the dark cut-away out of the preview for real.
+  // Confirm crop: the cut-away area is removed from the stage for real.
   // -------------------------------------------------------------------------
   confirmCrop() {
-    if (!this.video.videoWidth) return;
-    if (this.applied) return;
+    if (!this.video.videoWidth || this.applied) return;
     this.appliedBox = { ...this.box };
     this.appliedFull = { w: this.container.clientWidth, h: this.container.clientHeight };
     this.applied = true;
@@ -207,11 +232,6 @@ class CanvasCropper {
     this.updateDOM();
   }
 
-  /**
-   * Applied-mode layout: container becomes the crop window (fitted to the
-   * viewport at the crop's aspect), the video + mask/text layers are scaled
-   * and translated so exactly the cropped region is visible.
-   */
   layoutApplied(maxW, maxH) {
     const b = this.appliedBox;
     const full = this.appliedFull;
@@ -261,6 +281,8 @@ class CanvasCropper {
     this.currentRatioMode = mode;
     const map = { '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5, '16:9': 16 / 9, '4:3': 4 / 3 };
     this.ratioValue = map[mode] || null;
+    // The chosen preset IS the canvas aspect for the final render.
+    this.exportAspect = mode === 'free' ? 'auto' : mode;
 
     if (this.applied) {
       // Changing ratio in applied view: jump back to editing with the new box.
@@ -294,6 +316,7 @@ class CanvasCropper {
     this.appliedBox = null;
     this.appliedFull = null;
     this.appliedScale = 1;
+    this.exportAspect = 'auto';
     this.clearAppliedLayout();
     this.cropBox.style.display = 'block';
     Object.values(this.dims).forEach(d => { d.style.display = 'block'; });
@@ -318,6 +341,7 @@ class CanvasCropper {
     if (this.applied) this.editCrop();
     this.currentRatioMode = 'free';
     this.ratioValue = null;
+    this.exportAspect = 'auto';
     this.ratioCards.forEach(c => c.classList.toggle('active', c.dataset.ratio === 'free'));
     this.box = { x: 0, y: 0, w: this.container.clientWidth, h: this.container.clientHeight };
     this.updateDOM();
@@ -429,7 +453,7 @@ class CanvasCropper {
   getExportCanvas() {
     const c = this.getNativeCoords();
     if (!c) return null;
-    const [w, h] = resolveExportCanvas(c.width, c.height, this.getExportResolution());
+    const [w, h] = resolveExportCanvas(c.width, c.height, this.getExportResolution(), this.exportAspect);
     return { width: w, height: h };
   }
 
@@ -440,10 +464,14 @@ class CanvasCropper {
       if (this.exportPreview) this.exportPreview.textContent = '—';
       return;
     }
-    const [ew, eh] = resolveExportCanvas(c.width, c.height, this.getExportResolution());
+    const [ew, eh] = resolveExportCanvas(c.width, c.height, this.getExportResolution(), this.exportAspect);
+    const fitTag = this.exportFit === 'contain' ? ' · fit' : '';
     this.cropBadge.innerHTML =
-      `${this.ratioLabel()} · ${c.width}×${c.height} → <span class="export-dims">${ew}×${eh}</span>`;
-    if (this.exportPreview) this.exportPreview.textContent = `${ew} × ${eh}`;
+      `${this.ratioLabel()} · ${c.width}×${c.height} → <span class="export-dims">${ew}×${eh}</span>${fitTag}`;
+    if (this.exportPreview) {
+      const aspectTxt = this.exportAspect === 'auto' ? 'auto aspect' : this.exportAspect;
+      this.exportPreview.textContent = `${ew} × ${eh} · ${aspectTxt}${fitTag}`;
+    }
   }
 
   updateInputs() {

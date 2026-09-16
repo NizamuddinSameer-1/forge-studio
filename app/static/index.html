@@ -145,13 +145,17 @@
             </div>
             <p class="crop-mode-hint" id="cropModeHint">Drag the box over the frame — the dimmed area gets cut away — then hit Confirm Crop to see the real result.</p>
 
-            <!-- Export canvas: the exact size the export will have -->
+            <!-- Canvas aspect & export size -->
             <div class="export-size-card">
               <div class="section-header-flex">
-                <h4 class="subsection-title">Export Size</h4>
+                <h4 class="subsection-title">Canvas & Export</h4>
                 <span class="export-size-preview" id="cropExportPreview">—</span>
               </div>
-              <p class="section-desc">The final video is rendered at exactly this canvas — no surprise rescale after hashing.</p>
+              <p class="section-desc">The ratio preset above sets the canvas aspect for the final render. Fill crops to it; Fit pads with blurred bars — nothing is lost.</p>
+              <div class="mode-toggle" id="canvasFit">
+                <button class="mode-btn active" data-fit="cover">🖼 Fill (crop)</button>
+                <button class="mode-btn" data-fit="contain">🌫 Fit (blur bars)</button>
+              </div>
               <div class="export-size-options" id="exportResolution">
                 <button class="export-size-btn active" data-res="1080p">1080p <span>Full HD</span></button>
                 <button class="export-size-btn" data-res="720p">720p <span>Smaller file</span></button>
@@ -301,7 +305,7 @@
         <section class="tab-content" id="tab-hashing">
           <div class="panel-section">
             <h3 class="section-title">V7 Content Hashing</h3>
-            <p class="section-desc">Applies mathematical perturbations so platform bots detect your video as 100% unique.</p>
+            <p class="section-desc">Applies mathematical perturbations so platform bots detect your video as 100% unique. Runs on your cropped clip exactly as framed — and the hashed clip then replaces your working clip automatically.</p>
 
             <div class="toggle-header">
               <div>
@@ -372,11 +376,9 @@
           <div class="stage-canvas-container" id="stageCanvasContainer" style="display: none;">
             <video id="mainVideo" preload="metadata" playsinline></video>
 
-            <!-- Colour FX preview overlays (vignette / grain) -->
             <div class="fx-vignette" id="fxVignette"></div>
             <div class="fx-grain" id="fxGrain"></div>
 
-            <!-- Crop dim regions + snap guides are created by canvas_cropper.js -->
             <div class="crop-box" id="cropBox" style="display: none;">
               <div class="crop-badge" id="cropBadge">9:16</div>
               <div class="handle" data-handle="nw"></div>
@@ -389,10 +391,7 @@
               <div class="handle" data-handle="w"></div>
             </div>
 
-            <!-- Mask boxes are created dynamically by mask_overlay.js -->
             <div class="mask-stage-layer" id="maskStageLayer"></div>
-
-            <!-- Text layers -->
             <div class="text-stage-layer" id="textStageLayer"></div>
           </div>
         </div>
@@ -434,7 +433,6 @@
     <div class="modal-backdrop" id="exportModal" style="display: none;">
       <div class="modal-card">
 
-        <!-- Processing State -->
         <div class="modal-state" id="modalProcessingState">
           <div class="modal-spinner-wrap">
             <div class="pulse-ring"></div>
@@ -443,7 +441,6 @@
           <h2 class="modal-title" id="modalProcessingTitle">Hashing Your Video</h2>
           <p class="modal-subtitle" id="modalProgressStep">Starting the hashing engine...</p>
 
-          <!-- Exact pipeline stepper -->
           <div class="hash-stepper" id="hashStepper">
             <div class="hash-step" data-step="1"><span class="hash-step-dot"></span><span class="hash-step-label">Render edits</span></div>
             <div class="hash-step" data-step="2"><span class="hash-step-dot"></span><span class="hash-step-label">V7 hash encode</span></div>
@@ -461,7 +458,6 @@
           <button class="btn btn-secondary btn-sm modal-bg-btn" id="btnMinimizeModal">Continue in background</button>
         </div>
 
-        <!-- Success State -->
         <div class="modal-state" id="modalSuccessState" style="display: none;">
           <div class="success-icon-wrap">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -488,7 +484,6 @@
       </div>
     </div>
 
-    <!-- Toast Notifications -->
     <div class="toast-container" id="toastContainer"></div>
   </div>
 
