@@ -46,7 +46,7 @@ from app.editor_engine import (
 app = FastAPI(
     title="Custom Video Editing Micro-Studio",
     description="Video editing studio integrated with v7 content hashing pipeline",
-    version="2.1.0",
+    version="2.2.0",
 )
 
 # Enable CORS for local development
@@ -145,6 +145,12 @@ class ExportConfig(BaseModel):
     # Exact output canvas. "1080p" -> 1080x1920 for 9:16 crops (platform
     # standard), "720p" -> 720x1280, "source" -> keep the crop's own size.
     resolution: str = Field("1080p", description="1080p | 720p | source")
+    # Canvas aspect: "auto" buckets the crop's aspect; an explicit ratio
+    # ("9:16" etc.) forces the whole canvas to that ratio.
+    aspect: str = Field("auto", description="auto | 9:16 | 4:5 | 1:1 | 4:3 | 16:9")
+    # How the content meets the canvas: "cover" crops-to-fill (CapCut Fill),
+    # "contain" fits inside and pads with blurred bars (CapCut background).
+    fit: str = Field("cover", description="cover | contain")
 
 
 class ProcessVideoRequest(BaseModel):
@@ -158,6 +164,10 @@ class ProcessVideoRequest(BaseModel):
     text_layers: Optional[List[TextLayer]] = None
     hashing: Optional[HashingConfig] = None
     export: Optional[ExportConfig] = None
+
+
+class AdoptRequest(BaseModel):
+    filename: str = Field(..., description="Rendered output file to adopt as the studio clip")
 
 
 class StorageClearRequest(BaseModel):
@@ -531,8 +541,6 @@ async def get_hashing_profiles():
             "name": name,
             "description": profile_descriptions.get(name, "Custom V7 content hashing profile."),
             "is_default": name == "BALANCED",
-            # These profiles ask for the Stage 1.5 AI pass; without the deps
-            # they silently skip it, which the UI needs to say out loud.
             "uses_ml": name in ml_names,
         }
         for name in names
@@ -622,6 +630,45 @@ async def fetch_url(req: FetchUrlRequest):
         "success": True,
         "filename": target_file.name,
         "url": f"/uploads/{target_file.name}",
+        "width": meta["width"],
+        "height": meta["height"],
+        "duration": meta["duration"],
+        "fps": meta["fps"],
+        "size_mb": round(meta["size_bytes"] / (1024 * 1024), 2),
+    }
+
+
+@app.post("/api/adopt")
+async def adopt_output(req: AdoptRequest):
+    """Copy a rendered output back into uploads so it becomes the working clip.
+
+    This powers the auto-replace flow: after hashing, the anti-detected file
+    becomes the studio's current clip for further editing (masks, text,
+    canvas aspect) and final export - no manual download/re-upload needed.
+    """
+    src = _safe_child(OUTPUTS_DIR, req.filename)
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="Output file not found.")
+
+    clean = re.sub(r"[^a-zA-Z0-9_.-]", "_", src.name)
+    clean = re.sub(r"^\d{10}_", "", clean)  # avoid stacked timestamp prefixes
+    dest_name = f"{int(time.time())}_{clean}"
+    dest = UPLOADS_DIR / dest_name
+    try:
+        shutil.copy2(src, dest)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not adopt file: {e}")
+
+    try:
+        meta = probe_video(dest)
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Adopted file is not a readable video: {e}")
+
+    return {
+        "success": True,
+        "filename": dest_name,
+        "url": f"/uploads/{dest_name}",
         "width": meta["width"],
         "height": meta["height"],
         "duration": meta["duration"],
@@ -837,7 +884,6 @@ async def get_storage():
         "outputs": outputs,
         "uploads_total_mb": round(sum(i["size_mb"] for i in uploads), 2),
         "outputs_total_mb": round(sum(i["size_mb"] for i in outputs), 2),
-        # Deleting these means the next export has to re-hash.
         "in_use": sorted(in_use),
     }
 
@@ -916,10 +962,7 @@ async def download_file(filename: str):
 
 @app.get("/api/debug/threads")
 async def debug_threads():
-    """Local diagnostic: dump every thread's stack.
-
-    Handy when a job appears stuck - this shows exactly where.
-    """
+    """Local diagnostic: dump every thread's stack."""
     frames = sys._current_frames()
     names = {t.ident: t.name for t in threading.enumerate()}
     out = []
