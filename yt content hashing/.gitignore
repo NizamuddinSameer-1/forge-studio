@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Local media - source videos and renders should never be committed
+input/
+output/
+
+# Scratch / notebook dumps
+nb_out.txt
+scripts/_*.txt
+v7_pipeline_colab.zip
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,64 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Large video & audio media files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.mp3
+*.wav
+*.aac
+*.m4a
+
+# Keep folders intact with .gitkeep
+!/**/.gitkeep
+
+# Application temporary data & media
+/app/uploads/*
+!/app/uploads/.gitkeep
+/app/outputs/*
+!/app/outputs/.gitkeep
+
+# Hashing engine data directories
+/yt content hashing/input/*
+!/yt content hashing/input/.gitkeep
+/yt content hashing/output/*
+!/yt content hashing/output/.gitkeep
+
+# Standalone git backup folder
+.git_standalone_backup/
+
+# Compressed archives & temporary dumps
+*.zip
+*.tar.gz
+*.rar
+*.7z
+nb_out.txt
+scripts/_*.txt
+
+# AI and IDE metadata
+.workbuddy-ai/
+.idea/
+.vscode/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
