@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -110,9 +109,42 @@ FONT_MAP = {
     "Impact": FONTS_DIR / "impact.ttf",
 }
 
+# Emoji / symbol glyphs do not exist in the bundled Arial/Impact fonts, so a
+# caption like "POV: you" + emoji would render hollow boxes. When a layer
+# contains non-Latin glyphs we swap its fontfile to the OS emoji font if found.
+EMOJI_FONT_CANDIDATES = [
+    Path("C:/Windows/Fonts/segoeuiemoji.ttf"),       # Windows 10/11
+    Path("C:/Windows/Fonts/seguiemj.ttf"),           # older Windows name
+    Path("/System/Library/Fonts/Apple Color Emoji.ttc"),  # macOS
+    Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
+    Path("/usr/share/fonts/noto-color-emoji/NotoColorEmoji.ttf"),
+    Path("/usr/share/fonts/google-noto-color-emoji-fonts/NotoColorEmoji.ttf"),
+    FONTS_DIR / "NotoColorEmoji.ttf",
+]
+
+
+def _needs_symbol_font(text: str) -> bool:
+    return any(ord(c) > 0x2190 for c in text)
+
+
+def resolve_font(text: str, family: str) -> Path:
+    """Pick the font file for a text layer, falling back to an emoji font."""
+    base = FONT_MAP.get(family, FONT_MAP["Arial Bold"])
+    if _needs_symbol_font(text):
+        for candidate in EMOJI_FONT_CANDIDATES:
+            if candidate.exists():
+                return candidate
+        print("[!] Text contains emoji/symbols but no emoji font was found; "
+              "glyphs may render as boxes.")
+    return base
+
 
 def probe_video(video_path: str | Path) -> Dict[str, Any]:
-    """Inspect video file metadata using ffprobe."""
+    """Inspect video file metadata using ffprobe.
+
+    Raises on failure. Returning made-up dimensions here used to poison every
+    downstream crop calculation, so a probe failure must be loud, not silent.
+    """
     p = Path(video_path)
     if not p.exists():
         raise FileNotFoundError(f"Video file not found: {p}")
@@ -148,24 +180,63 @@ def probe_video(video_path: str | Path) -> Dict[str, Any]:
             if float(den) > 0:
                 fps = round(float(num) / float(den), 2)
 
+        width = int(stream.get("width", 0))
+        height = int(stream.get("height", 0))
+        if width <= 0 or height <= 0:
+            raise ValueError("ffprobe reported no usable video dimensions")
+
         return {
-            "width": int(stream.get("width", 0)),
-            "height": int(stream.get("height", 0)),
+            "width": width,
+            "height": height,
             "duration": round(duration, 2),
             "fps": fps,
             "codec": stream.get("codec_name", "unknown"),
             "size_bytes": int(fmt.get("size", p.stat().st_size)),
         }
     except Exception as e:
-        print(f"[WARN] ffprobe failed: {e}")
-        return {
-            "width": 1080,
-            "height": 1920,
-            "duration": 0.0,
-            "fps": 30.0,
-            "codec": "unknown",
-            "size_bytes": p.stat().st_size,
-        }
+        raise RuntimeError(f"Could not probe '{p.name}': {e}") from e
+
+
+# ==========================================================================
+# Export canvas - the fix for "my 9:16 crop exports at a random resolution"
+# ==========================================================================
+# The editor canvas and the final export now agree on EXACT platform-standard
+# dimensions. The hash engine no longer rescales (it used to force 1280-wide
+# portrait / 720-tall landscape, and its blur-border /10*10 trick truncated
+# 1920 -> 2270px, drifting off the true aspect ratio).
+EXPORT_CANVASES: Dict[str, Dict[str, Tuple[int, int]]] = {
+    "9:16": {"1080p": (1080, 1920), "720p": (720, 1280)},
+    "4:5": {"1080p": (1080, 1350), "720p": (720, 900)},
+    "1:1": {"1080p": (1080, 1080), "720p": (720, 720)},
+    "4:3": {"1080p": (1440, 1080), "720p": (960, 720)},
+    "16:9": {"1080p": (1920, 1080), "720p": (1280, 720)},
+}
+
+EXPORT_RESOLUTIONS = ("1080p", "720p", "source")
+
+
+def resolve_export_canvas(crop_w: int, crop_h: int, resolution: str = "1080p") -> Tuple[int, int]:
+    """Map a user crop to the exact export canvas for its aspect bucket.
+
+    "source" keeps the crop's own even-clamped dimensions (no scaling at all).
+    """
+    res = (resolution or "1080p").lower()
+    if res == "source":
+        return (max(2, crop_w - crop_w % 2), max(2, crop_h - crop_h % 2))
+    if res not in ("1080p", "720p"):
+        res = "1080p"
+    r = crop_w / max(1, crop_h)
+    if r < 0.65:
+        bucket = "9:16"
+    elif r < 0.90:
+        bucket = "4:5"
+    elif r < 1.15:
+        bucket = "1:1"
+    elif r < 1.50:
+        bucket = "4:3"
+    else:
+        bucket = "16:9"
+    return EXPORT_CANVASES[bucket][res]
 
 
 def escape_drawtext(text: str) -> str:
@@ -180,27 +251,239 @@ def escape_drawtext(text: str) -> str:
     return text
 
 
+def _clip(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+# ==========================================================================
+# Colour grading - full CapCut-style adjust suite
+# ==========================================================================
+def _color_filters(cg: Optional[Dict[str, Any]]) -> List[str]:
+    """Build the ordered colour/detail filter list.
+
+    Controls (all optional, identity by default):
+      sharpen 0..2.5 | brightness -1..1 | contrast 0.1..2.5 | saturation 0..3
+      exposure -1..1 (gamma) | highlights -1..1 | shadows -1..1 (colorlevels)
+      temperature -0.5..0.5 | tint -1..1 (colorbalance)
+      fade 0..1 (curves) | grain 0..1 (noise) | vignette 0..1
+    """
+    cg = cg or {}
+    filters: List[str] = []
+
+    sharpen = _clip(float(cg.get("sharpen", 0.0)), 0.0, 2.5)
+    if sharpen > 0.01:
+        ca = sharpen * 0.4
+        filters.append(f"unsharp=lx=5:ly=5:la={sharpen:.2f}:cx=5:cy=5:ca={ca:.2f}")
+
+    shadows = _clip(float(cg.get("shadows", 0.0)), -1.0, 1.0)
+    highlights = _clip(float(cg.get("highlights", 0.0)), -1.0, 1.0)
+    if abs(shadows) > 0.01 or abs(highlights) > 0.01:
+        # colorlevels: rimin<0 lifts blacks (matte shadows), rimax<1 expands
+        # highlights brighter, romax<1 dims whites (highlight recovery).
+        rimin = -0.22 * shadows
+        rimax = 1.0 - 0.25 * highlights if highlights > 0 else 1.0
+        romax = 1.0 if highlights >= 0 else max(0.45, 1.0 + 0.25 * highlights)
+        rimin = _clip(rimin, -0.5, 0.5)
+        rimax = _clip(rimax, 0.55, 1.0)
+        filters.append(
+            f"colorlevels=rimin={rimin:.3f}:gimin={rimin:.3f}:bimin={rimin:.3f}"
+            f":rimax={rimax:.3f}:gimax={rimax:.3f}:bimax={rimax:.3f}"
+            f":romax={romax:.3f}:gomax={romax:.3f}:bomax={romax:.3f}"
+        )
+
+    brightness = _clip(float(cg.get("brightness", 0.0)), -1.0, 1.0)
+    contrast = _clip(float(cg.get("contrast", 1.0)), 0.1, 2.5)
+    saturation = _clip(float(cg.get("saturation", 1.0)), 0.0, 3.0)
+    exposure = _clip(float(cg.get("exposure", 0.0)), -1.0, 1.0)
+    gamma = _clip(2.0 ** exposure, 0.5, 2.0)
+    if (
+        abs(brightness) > 0.001
+        or abs(contrast - 1.0) > 0.001
+        or abs(saturation - 1.0) > 0.001
+        or abs(exposure) > 0.01
+    ):
+        filters.append(
+            f"eq=brightness={brightness:.3f}:contrast={contrast:.3f}"
+            f":saturation={saturation:.3f}:gamma={gamma:.3f}"
+        )
+
+    temperature = _clip(float(cg.get("temperature", 0.0)), -0.5, 0.5)
+    tint = _clip(float(cg.get("tint", 0.0)), -1.0, 1.0)
+    if abs(temperature) > 0.01 or abs(tint) > 0.01:
+        # Full-range warmth (red/blue) and green/magenta tint across shadows,
+        # midtones and highlights - closer to CapCut than shadows-only.
+        rs, rm, rh = temperature * 0.30, temperature * 0.34, temperature * 0.22
+        bs, bm, bh = -rs, -rm, -rh
+        gs, gm, gh = tint * 0.16, tint * 0.30, tint * 0.14
+        filters.append(
+            f"colorbalance=rs={rs:.3f}:rm={rm:.3f}:rh={rh:.3f}"
+            f":bs={bs:.3f}:bm={bm:.3f}:bh={bh:.3f}"
+            f":gs={gs:.3f}:gm={gm:.3f}:gh={gh:.3f}"
+        )
+
+    fade = _clip(float(cg.get("fade", 0.0)), 0.0, 1.0)
+    if fade > 0.01:
+        # Filmic fade: lift black point, ease off whites.
+        y0 = 0.16 * fade
+        y2 = 1.0 - 0.08 * fade
+        filters.append(f"curves=master='0/{y0:.3f} 0.5/0.5 1/{y2:.3f}'")
+
+    grain = _clip(float(cg.get("grain", 0.0)), 0.0, 1.0)
+    if grain > 0.01:
+        strength = max(1, int(round(grain * 28)))
+        filters.append(f"noise=alls={strength}:allf=t+u")
+
+    vignette = _clip(float(cg.get("vignette", 0.0)), 0.0, 1.0)
+    if vignette > 0.01:
+        # vignette 'angle': PI/2 = no effect; smaller = stronger dark corners.
+        angle = 1.5708 - vignette * 1.1708  # 1 -> 0.40 rad (strong)
+        filters.append(f"vignette=angle={angle:.4f}:mode=forward")
+
+    return filters
+
+
+# ==========================================================================
+# Mask chains - multiple regions, blur or pixelate
+# ==========================================================================
+def _mask_graph(
+    masks: Optional[List[Dict[str, Any]]],
+    frame_w: int,
+    frame_h: int,
+    in_tag: str,
+) -> Tuple[str, str]:
+    """Chain any number of blur/pixelate masks. Returns (graph, out_tag)."""
+    active = [m for m in (masks or []) if m and m.get("enabled", True)]
+    graph = ""
+    last = in_tag
+    for idx, m in enumerate(active):
+        mw = int(m.get("width", 160))
+        mh = int(m.get("height", 80))
+        mx = int(m.get("x", 50))
+        my = int(m.get("y", 50))
+        intensity = int(m.get("blur", 20))  # blur radius OR pixel block size
+        mode = str(m.get("mode", "blur")).lower()
+
+        mw = max(4, min(frame_w, mw))
+        mh = max(4, min(frame_h, mh))
+        mw -= mw % 2
+        mh -= mh % 2
+        mx = max(0, min(frame_w - mw, mx))
+        my = max(0, min(frame_h - mh, my))
+
+        if mode == "pixelate":
+            block = max(4, min(64, intensity))
+            dw = max(2, mw // block)
+            dh = max(2, mh // block)
+            effect = (
+                f"crop={mw}:{mh}:{mx}:{my},"
+                f"scale={dw}:{dh}:flags=neighbor,"
+                f"scale={mw}:{mh}:flags=neighbor"
+            )
+        else:
+            radius = max(2, min(50, intensity))
+            effect = (
+                f"crop={mw}:{mh}:{mx}:{my},"
+                f"boxblur=luma_radius={radius}:luma_power=2"
+            )
+
+        graph += (
+            f";{last}split=2[m{idx}_base][m{idx}_src];"
+            f"[m{idx}_src]{effect}[m{idx}_fx];"
+            f"[m{idx}_base][m{idx}_fx]overlay={mx}:{my}[m{idx}_out]"
+        )
+        last = f"[m{idx}_out]"
+
+    return graph, last
+
+
+# ==========================================================================
+# Text layers - multi-line, per-layer timing, emoji fallback
+# ==========================================================================
+def _text_filters(
+    text_layers: Optional[List[Dict[str, Any]]],
+    frame_w: int,
+    frame_h: int,
+) -> List[str]:
+    filters: List[str] = []
+    for layer in text_layers or []:
+        raw = (layer.get("text") or "").strip()
+        if not raw:
+            continue
+
+        font_family = layer.get("font_family", "Arial Bold")
+        font_path = resolve_font(raw, font_family)
+        font_path_str = str(font_path).replace("\\", "/").replace(":", "\\:")
+
+        font_size = max(8, int(layer.get("font_size", 36)))
+        font_color = str(layer.get("color", "#FFFFFF")).replace("#", "")
+        stroke_w = max(0, int(layer.get("stroke_width", 2)))
+        stroke_color = str(layer.get("stroke_color", "#000000")).replace("#", "")
+
+        tx = max(0, min(frame_w - 8, int(layer.get("x", 50))))
+        ty = max(0, min(frame_h - 8, int(layer.get("y", 50))))
+
+        # Optional visibility window, e.g. CapCut-style timed captions.
+        enable = ""
+        start = layer.get("start")
+        end = layer.get("end")
+        if start is not None or end is not None:
+            s = float(start) if start is not None else 0.0
+            if end is not None and float(end) > s:
+                enable = f":enable='between(t,{s:.3f},{float(end):.3f})'"
+            elif s > 0:
+                enable = f":enable='gte(t,{s:.3f})'"
+
+        # Multi-line captions: one drawtext per line, stacked with leading.
+        lines = raw.splitlines() or [raw]
+        line_h = int(round(font_size * 1.28))
+        for li, line in enumerate(lines):
+            if not line.strip():
+                continue
+            txt = escape_drawtext(line.strip())
+            y = ty + li * line_h
+
+            dt = (
+                f"drawtext=fontfile='{font_path_str}':text='{txt}':"
+                f"fontsize={font_size}:fontcolor=0x{font_color}:"
+                f"x={tx}:y={y}"
+            )
+            if stroke_w > 0:
+                dt += f":borderw={stroke_w}:bordercolor=0x{stroke_color}"
+            if layer.get("bg_enabled", False):
+                bg_col = str(layer.get("bg_color", "#000000")).replace("#", "")
+                bg_alpha = _clip(float(layer.get("bg_opacity", 0.6)), 0.0, 1.0)
+                dt += f":box=1:boxcolor=0x{bg_col}@{bg_alpha:.2f}:boxborderw=8"
+            dt += enable
+            filters.append(dt)
+
+    return filters
+
+
 def build_filter_chain(
     width: int,
     height: int,
     crop: Optional[Dict[str, Any]] = None,
     color_grade: Optional[Dict[str, Any]] = None,
-    mask: Optional[Dict[str, Any]] = None,
+    masks: Optional[List[Dict[str, Any]]] = None,
     text_layers: Optional[List[Dict[str, Any]]] = None,
+    export: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, int, int]:
     """
-    Builds the complex filter string for:
-    Crop -> Color grading/Sharpening -> Mask Blur -> Text layers.
+    Builds the complex filter graph:
+      Crop -> Canvas fit (exact export size) -> Colour suite -> Masks -> Text.
     Returns (filter_complex_string, final_w, final_h).
+
+    Mask and text coordinates arrive in CROP space; after the canvas fit they
+    are scaled by the same factor the frame was, so what you see on the
+    studio canvas is exactly what lands in the export.
     """
-    # 1. Calculate Crop
+    # 1. Crop rectangle (clamped, even)
     if crop and crop.get("enabled", True):
         cw = int(crop.get("width", width))
         ch = int(crop.get("height", height))
         cx = int(crop.get("x", 0))
         cy = int(crop.get("y", 0))
 
-        # Clamp and make even
         cw = max(2, min(width - cx, cw))
         ch = max(2, min(height - cy, ch))
         cw = cw - (cw % 2)
@@ -213,120 +496,61 @@ def build_filter_chain(
         cx = 0
         cy = 0
 
-    current_w, current_h = cw, ch
-    filter_stages: List[str] = []
+    # 2. Exact export canvas (cover-fit: scale up to fill, centre-crop the rest)
+    resolution = (export or {}).get("resolution", "1080p")
+    canvas_w, canvas_h = resolve_export_canvas(cw, ch, resolution)
 
-    # Start with initial crop
-    filter_stages.append(f"crop={cw}:{ch}:{cx}:{cy}")
+    filter_stages: List[str] = [f"crop={cw}:{ch}:{cx}:{cy}"]
+    if (canvas_w, canvas_h) != (cw, ch):
+        filter_stages.append(
+            f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase:flags=bicubic"
+        )
+        filter_stages.append(f"crop={canvas_w}:{canvas_h}")
 
-    # 2. Color Grading & Sharpening
-    cg = color_grade or {}
-    sharpen = float(cg.get("sharpen", 0.0))  # 0.0 to 2.5
-    brightness = float(cg.get("brightness", 0.0))  # -1.0 to 1.0 (default 0.0)
-    contrast = float(cg.get("contrast", 1.0))  # 0.1 to 2.0 (default 1.0)
-    saturation = float(cg.get("saturation", 1.0))  # 0.0 to 3.0 (default 1.0)
-    temperature = float(cg.get("temperature", 0.0))  # -0.5 (cool) to 0.5 (warm)
+    # Coordinate space conversion for overlays added after the canvas fit
+    sx = canvas_w / cw if cw else 1.0
+    sy = canvas_h / ch if ch else 1.0
 
-    # Apply unsharp filter if sharpen > 0
-    if sharpen > 0.01:
-        # luma_amount: 0.0 to 2.5
-        la = min(2.5, max(0.0, sharpen))
-        ca = la * 0.4
-        filter_stages.append(f"unsharp=lx=5:ly=5:la={la:.2f}:cx=5:cy=5:ca={ca:.2f}")
+    def _scale_mask(m: Dict[str, Any]) -> Dict[str, Any]:
+        scaled = dict(m)
+        scaled["x"] = int(round(scaled.get("x", 0) * sx))
+        scaled["y"] = int(round(scaled.get("y", 0) * sy))
+        scaled["width"] = max(4, int(round(scaled.get("width", 160) * sx)))
+        scaled["height"] = max(4, int(round(scaled.get("height", 80) * sy)))
+        return scaled
 
-    # Apply eq filter if brightness, contrast, or saturation differ from identity
-    if abs(brightness) > 0.001 or abs(contrast - 1.0) > 0.001 or abs(saturation - 1.0) > 0.001:
-        b_val = max(-1.0, min(1.0, brightness))
-        c_val = max(0.1, min(2.5, contrast))
-        s_val = max(0.0, min(3.0, saturation))
-        filter_stages.append(f"eq=brightness={b_val:.3f}:contrast={c_val:.3f}:saturation={s_val:.3f}")
+    def _scale_text(layer: Dict[str, Any]) -> Dict[str, Any]:
+        scaled = dict(layer)
+        scaled["x"] = int(round(scaled.get("x", 0) * sx))
+        scaled["y"] = int(round(scaled.get("y", 0) * sy))
+        scaled["font_size"] = max(8, int(round(scaled.get("font_size", 36) * sy)))
+        scaled["stroke_width"] = max(0, int(round(scaled.get("stroke_width", 0) * sy)))
+        return scaled
 
-    # Apply temperature / colorbalance if non-zero
-    if abs(temperature) > 0.01:
-        # warmth > 0: red positive, blue negative
-        temp_val = max(-0.5, min(0.5, temperature))
-        rs = temp_val * 0.6
-        bs = -temp_val * 0.6
-        filter_stages.append(f"colorbalance=rs={rs:.3f}:bs={bs:.3f}")
+    scaled_masks = [_scale_mask(m) for m in (masks or [])]
+    scaled_text = [_scale_text(t) for t in (text_layers or [])]
 
-    # Combine the linear pre-filters
+    # 3. Colour suite
+    filter_stages.extend(_color_filters(color_grade))
+
     combined_linear = ",".join(filter_stages)
 
-    # 3. Mask Blur
-    # If mask is enabled, we split, crop sub-region, blur, and overlay back
-    mask_chain = ""
+    # 4. Masks (any number, blur or pixelate)
     last_v_tag = "[v_cg]"
     complex_graph = f"[0:v]{combined_linear}{last_v_tag}"
+    mask_graph, last_v_tag = _mask_graph(scaled_masks, canvas_w, canvas_h, last_v_tag)
+    complex_graph += mask_graph
 
-    if mask and mask.get("enabled", False):
-        mw = int(mask.get("width", 160))
-        mh = int(mask.get("height", 80))
-        mx = int(mask.get("x", 50))
-        my = int(mask.get("y", 50))
-        blur_radius = int(mask.get("blur", 20))  # 5 to 50
+    # 5. Text layers
+    text_filters = _text_filters(scaled_text, canvas_w, canvas_h)
+    if text_filters:
+        complex_graph += f";{last_v_tag}{','.join(text_filters)}[v_out]"
+        last_v_tag = "[v_out]"
 
-        # Clamp mask coordinates within cropped canvas
-        mw = max(4, min(current_w, mw))
-        mh = max(4, min(current_h, mh))
-        mw = mw - (mw % 2)
-        mh = mh - (mh % 2)
-        mx = max(0, min(current_w - mw, mx))
-        my = max(0, min(current_h - mh, my))
-
-        complex_graph += (
-            f";{last_v_tag}split=2[v_base][v_to_blur];"
-            f"[v_to_blur]crop={mw}:{mh}:{mx}:{my},"
-            f"boxblur=luma_radius={blur_radius}:luma_power=2[v_blurred];"
-            f"[v_base][v_blurred]overlay={mx}:{my}[v_masked]"
-        )
-        last_v_tag = "[v_masked]"
-
-    # 4. Text Layers
-    if text_layers:
-        text_filters = []
-        for idx, layer in enumerate(text_layers):
-            if not layer.get("text", "").strip():
-                continue
-            txt = escape_drawtext(layer.get("text", "").strip())
-            font_family = layer.get("font_family", "Arial Bold")
-            font_path = FONT_MAP.get(font_family, FONT_MAP["Arial Bold"])
-            # Format path for FFmpeg (escape colons and backslashes)
-            font_path_str = str(font_path).replace("\\", "/").replace(":", "\\:")
-
-            font_size = int(layer.get("font_size", 36))
-            font_color = layer.get("color", "#FFFFFF").replace("#", "")
-            stroke_w = int(layer.get("stroke_width", 2))
-            stroke_color = layer.get("stroke_color", "#000000").replace("#", "")
-
-            # Position
-            tx = int(layer.get("x", 50))
-            ty = int(layer.get("y", 50))
-
-            dt_filter = (
-                f"drawtext=fontfile='{font_path_str}':text='{txt}':"
-                f"fontsize={font_size}:fontcolor=0x{font_color}:"
-                f"x={tx}:y={ty}"
-            )
-            if stroke_w > 0:
-                dt_filter += f":borderw={stroke_w}:bordercolor=0x{stroke_color}"
-
-            if layer.get("bg_enabled", False):
-                bg_col = layer.get("bg_color", "#000000").replace("#", "")
-                bg_alpha = float(layer.get("bg_opacity", 0.6))
-                dt_filter += f":box=1:boxcolor=0x{bg_col}@{bg_alpha:.2f}:boxborderw=8"
-
-            text_filters.append(dt_filter)
-
-        if text_filters:
-            dt_joined = ",".join(text_filters)
-            complex_graph += f";{last_v_tag}{dt_joined}[v_out]"
-            last_v_tag = "[v_out]"
-
-    # If last tag is not [v_out], map it cleanly
     if last_v_tag != "[v_out]":
         complex_graph += f";{last_v_tag}copy[v_out]"
 
-    return complex_graph, current_w, current_h
+    return complex_graph, canvas_w, canvas_h
 
 
 def render_edit(
@@ -337,13 +561,16 @@ def render_edit(
     trim_end: Optional[float] = None,
     crop: Optional[Dict[str, Any]] = None,
     color_grade: Optional[Dict[str, Any]] = None,
-    mask: Optional[Dict[str, Any]] = None,
+    masks: Optional[List[Dict[str, Any]]] = None,
     text_layers: Optional[List[Dict[str, Any]]] = None,
+    export: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Executes FFmpeg rendering of all user edits:
-    Trim -> Crop -> Color Grade / Sharpen -> Blur Mask -> Text Overlays.
-    Outputs a clean H.264 video.
+    Trim -> Crop -> Canvas fit -> Colour suite -> Masks -> Text overlays.
+    Outputs a clean H.264 video at the exact export canvas size.
+
+    Prints `RENDER_PROGRESS <pct>` lines so callers can show real progress.
     """
     in_p = Path(input_video)
     out_p = Path(output_path)
@@ -359,11 +586,13 @@ def render_edit(
         height=height,
         crop=crop,
         color_grade=color_grade,
-        mask=mask,
+        masks=masks,
         text_layers=text_layers,
+        export=export,
     )
+    print(f"[ ] Editor render target: {fw}x{fh}")
 
-    cmd = ["ffmpeg", "-y"]
+    cmd = ["ffmpeg", "-y", "-nostats", "-loglevel", "error", "-progress", "pipe:1"]
 
     # Precision trimming
     if trim_start > 0.05:
@@ -371,11 +600,11 @@ def render_edit(
 
     cmd.extend(["-i", str(in_p)])
 
+    eff_dur = total_dur
     if trim_end is not None and trim_end > trim_start:
-        dur = trim_end - trim_start
-        cmd.extend(["-t", f"{dur:.3f}"])
+        eff_dur = trim_end - trim_start
+        cmd.extend(["-t", f"{eff_dur:.3f}"])
 
-    # Filter complex
     cmd.extend([
         "-filter_complex", filter_complex,
         "-map", "[v_out]",
@@ -390,17 +619,55 @@ def render_edit(
         str(out_p),
     ])
 
-    print(f"[FFmpeg] Running command:\n{' '.join(cmd)}")
+    print(f"[FFmpeg] Running editor render ({fw}x{fh})...")
     t0 = time.time()
     # Duration-scaled cap so a wedged ffmpeg can never hang the request forever.
     timeout = max(600.0, total_dur * 30) if total_dur > 0 else 1800.0
+
+    proc = None
+    err_tail: List[str] = []
+    last_pct = -1
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        print(f"[ERR] FFmpeg render timed out after {timeout:.0f}s")
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        deadline = time.monotonic() + timeout
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            if time.monotonic() > deadline:
+                proc.kill()
+                print(f"[ERR] FFmpeg render timed out after {timeout:.0f}s")
+                return False
+            line_s = line.strip()
+            if line_s.startswith("out_time_us=") and eff_dur > 0:
+                try:
+                    out_us = int(line_s.split("=", 1)[1])
+                    pct = min(100, int(out_us / 1_000_000 / eff_dur * 100))
+                    if pct != last_pct:
+                        last_pct = pct
+                        print(f"RENDER_PROGRESS {pct}", flush=True)
+                except (ValueError, IndexError):
+                    pass
+            elif line_s == "progress=end":
+                break
+            elif line_s:
+                err_tail.append(line_s)
+                del err_tail[:-40]
+        proc.wait(timeout=60)
+    except Exception as e:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+        print(f"[ERR] FFmpeg render crashed: {e}")
         return False
-    if res.returncode != 0:
-        print(f"[ERR] FFmpeg render failed:\n{res.stderr[-1000:]}")
+
+    if proc.returncode != 0:
+        print(f"[ERR] FFmpeg render failed (code {proc.returncode}):")
+        for ln in err_tail[-12:]:
+            print(f"  {ln}")
         return False
 
     print(f"[OK] Render complete in {time.time() - t0:.2f}s -> {out_p}")
@@ -416,7 +683,9 @@ def execute_full_pipeline(
     crop: Optional[Dict[str, Any]] = None,
     color_grade: Optional[Dict[str, Any]] = None,
     mask: Optional[Dict[str, Any]] = None,
+    masks: Optional[List[Dict[str, Any]]] = None,
     text_layers: Optional[List[Dict[str, Any]]] = None,
+    export: Optional[Dict[str, Any]] = None,
     apply_hashing: bool = True,
     hashing_profile: str = "BALANCED",
     seed: Optional[int] = None,
@@ -426,11 +695,14 @@ def execute_full_pipeline(
     """
     Unified master pipeline:
     1. Reads source video.
-    2. Renders custom user edits (crop, trim, sharpen, color, mask, text) to temp file.
-    3. If apply_hashing is True, runs v7_pipeline.stage1.process_video(...) on the edited video.
+    2. Renders custom user edits (crop, trim, colour suite, masks, text) at
+       the exact export canvas size to a temp file.
+    3. If apply_hashing is True, runs v7_pipeline.stage1.process_video(...) on
+       the edited video with rescale disabled, so the hashed output keeps the
+       exact export dimensions instead of the engine's old forced re-scale.
     4. Verifies SHA-256 and gathers output metrics.
 
-    `on_stage` receives short human-readable progress messages for the UI.
+    `on_stage` receives structured `[STAGE k/N] label` markers for the UI.
     """
 
     def _stage(message: str) -> None:
@@ -446,6 +718,10 @@ def execute_full_pipeline(
 
     if not in_p.exists():
         return {"success": False, "error": f"Source video not found: {in_p.name}"}
+
+    # Legacy single-mask callers still work.
+    if masks is None and mask is not None:
+        masks = [mask]
 
     # Hashing was explicitly requested but the engine never loaded. Emitting an
     # unhashed file here would be a silent and dangerous failure, so refuse.
@@ -473,21 +749,26 @@ def execute_full_pipeline(
     except Exception:
         pass
 
+    total_stages = 3 if apply_hashing else 2
     final_output_file: Optional[Path] = None
 
     try:
-        # Step 1: Render the user's edits
-        _stage("Rendering edits: crop, colour, mask and text overlays...")
-        render_ok = render_edit(
-            in_p,
-            temp_edited,
-            trim_start=trim_start,
-            trim_end=trim_end,
-            crop=crop,
-            color_grade=color_grade,
-            mask=mask,
-            text_layers=text_layers,
-        )
+        # Stage 1: Render the user's edits at the exact export canvas
+        _stage(f"[STAGE 1/{total_stages}] Rendering edits - crop, colour, masks, text")
+        try:
+            render_ok = render_edit(
+                in_p,
+                temp_edited,
+                trim_start=trim_start,
+                trim_end=trim_end,
+                crop=crop,
+                color_grade=color_grade,
+                masks=masks,
+                text_layers=text_layers,
+                export=export,
+            )
+        except Exception as e:
+            return {"success": False, "error": f"Render setup failed: {e}"}
 
         if not render_ok or not temp_edited.exists():
             return {
@@ -495,9 +776,9 @@ def execute_full_pipeline(
                 "error": "Video rendering failed during editing stage.",
             }
 
-        # Step 2: Content hashing pipeline
+        # Stage 2: Content hashing pipeline (no re-scale - keep export canvas)
         if apply_hashing:
-            _stage(f"Running v7 content hashing ({hashing_profile})...")
+            _stage(f"[STAGE 2/{total_stages}] V7 {hashing_profile} hash encode - anti-detection pass")
             print(f"[Pipeline] Passing edited video to v7_pipeline with profile: {hashing_profile}")
             hashing_out = v7_process_video(
                 temp_edited,
@@ -507,6 +788,7 @@ def execute_full_pipeline(
                 pad=pad_bytes,
                 verify_hash=True,
                 name_hint=stem,
+                rescale=False,
             )
 
             if not hashing_out or not Path(hashing_out).exists():
@@ -515,8 +797,9 @@ def execute_full_pipeline(
                     "error": f"v7_pipeline processing failed for profile '{hashing_profile}'.",
                 }
             final_output_file = Path(hashing_out)
-            _stage("Verifying the hashed output...")
+            _stage(f"[STAGE {total_stages}/{total_stages}] Finalizing - validate, pad, verify hash")
         else:
+            _stage(f"[STAGE {total_stages}/{total_stages}] Packaging export")
             final_output_file = out_d / f"{stem}_edited_{ts}.mp4"
             shutil.move(str(temp_edited), str(final_output_file))
     finally:
@@ -535,7 +818,10 @@ def execute_full_pipeline(
     except Exception:
         pass
 
-    out_info = probe_video(final_output_file)
+    try:
+        out_info = probe_video(final_output_file)
+    except Exception as e:
+        return {"success": False, "error": f"Output probe failed: {e}"}
 
     return {
         "success": True,
@@ -550,5 +836,6 @@ def execute_full_pipeline(
         "size_mb": round(final_output_file.stat().st_size / (1024 * 1024), 2),
         "hashing_applied": bool(apply_hashing),
         "profile_used": hashing_profile if apply_hashing else "NONE",
+        "export_resolution": (export or {}).get("resolution", "1080p"),
         "engine_available": PIPELINE_AVAILABLE,
     }

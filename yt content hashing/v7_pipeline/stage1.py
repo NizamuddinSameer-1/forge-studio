@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 from v7_pipeline.config import (
+    DOWNSCALE_H,
+    DOWNSCALE_W,
     FRAME_RATE_MODE,
     OUTPUT_FRAME_RATE,
     Profile,
@@ -22,7 +24,7 @@ from v7_pipeline.encoder import (
 )
 from v7_pipeline.filters import build_filter_complex, sample_random_params
 from v7_pipeline.paths import temp_work_dir
-from v7_pipeline.validate import get_duration_sec, validate_output
+from v7_pipeline.validate import get_duration_sec, get_video_size, validate_output
 
 
 def make_output_name(input_name: str, hint: str | None = None) -> str:
@@ -71,11 +73,18 @@ def process_video(
     pad: bool = True,
     verify_hash: bool = True,
     name_hint: str | None = None,
+    rescale: bool | None = None,
 ) -> str | None:
     """Stage 1 only. Returns output path or None. Never writes metadata atoms.
 
     `name_hint` names the output after the user's real video when the input is
     an internal temp render (see `make_output_name`).
+    `rescale` controls the output canvas: default (None) keeps the classic CLI
+    behaviour (landscape -> 720px tall, portrait/square -> 1280px wide, now
+    with exact even rounding); `rescale=False` preserves the input dimensions
+    untouched — Forge Studio passes False because the editor already rendered
+    the exact export canvas, and the old forced re-scale upscaled user crops
+    and drifted 1080x1920 -> 1280x2270 through the blur-border chain.
     """
     p = Path(in_video)
     od = Path(out_dir)
@@ -119,11 +128,28 @@ def process_video(
             rp.pad_bytes = 0
         print(f"[ ] Seed: {rp.seed} (use --seed {rp.seed} to reproduce this exact run)")
 
+        scale_to: tuple[int, int] | None = None
+        if rescale is not False:
+            iw, ih = get_video_size(p)
+            if iw > 0 and ih > 0:
+                if iw > ih:  # landscape -> 720 tall, width rounded to even
+                    th = DOWNSCALE_H
+                    tw = int(round(iw * th / ih / 2) * 2)
+                else:  # portrait / square -> 1280 wide, height rounded to even
+                    tw = DOWNSCALE_W
+                    th = int(round(ih * tw / iw / 2) * 2)
+                scale_to = (tw, th)
+                print(f"[ ] Output canvas: {tw}x{th}")
+            else:
+                print("[!] Could not probe dimensions; keeping source size")
+        else:
+            print("[ ] Output canvas: source (no rescale)")
+
         encoder, enc_reason = detect_encoder()
         print(f"[ ] Encoder: {encoder} ({enc_reason})")
         print(f"[ ] Config: CRF={rp.crf} GOP={rp.gop} PTS_Jitter={rp.pts_jitter:.6f}")
 
-        fc, extra = build_filter_complex(prof, rp)
+        fc, extra = build_filter_complex(prof, rp, scale_to=scale_to)
         params = EncodeParams(
             encoder=encoder,
             crf=rp.crf,
@@ -151,7 +177,7 @@ def process_video(
                     f"[!] Audio encode failed (seed={rp.seed}); "
                     "retrying with simpler audio chain (pitch+EQ+comb only)..."
                 )
-                fc, extra = build_filter_complex(prof, rp, simple_audio=True)
+                fc, extra = build_filter_complex(prof, rp, scale_to=scale_to, simple_audio=True)
                 ok, log_tail, used = encode_with_fallback(
                     str(local_in),
                     str(local_out),
@@ -165,7 +191,7 @@ def process_video(
                         f"[!] Simple audio also failed (seed={rp.seed}); "
                         "rebuilding without audio as last resort..."
                     )
-                    fc, extra = build_filter_complex(prof, rp, include_audio=False)
+                    fc, extra = build_filter_complex(prof, rp, scale_to=scale_to, include_audio=False)
                     ok, log_tail, used = encode_with_fallback(
                         str(local_in),
                         str(local_out),

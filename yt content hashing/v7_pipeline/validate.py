@@ -39,6 +39,32 @@ def get_duration_sec(path: str | Path) -> float:
         return 0.0
 
 
+def get_video_size(path: str | Path) -> tuple[int, int]:
+    """(width, height) of the first video stream, or (0, 0) on failure."""
+    try:
+        r = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        w, h = r.stdout.strip().split(",")[:2]
+        return int(w), int(h)
+    except Exception:
+        return 0, 0
+
+
 def duration_tolerance_ok(source_sec: float, out_sec: float) -> bool:
     if source_sec <= 0 or out_sec <= 0:
         return out_sec > 0  # if source unknown, only require positive out
@@ -99,7 +125,7 @@ def validate_output(
             has_a,
             dur,
             size,
-            f"duration mismatch source={source_duration:.2f}s out={dur:.2f}s",
+            f"duration mismatch source={source_sec:.2f}s out={dur:.2f}s",
         )
     msg = "video+audio" if has_a else "video-only (no audio)"
     return ValidationResult(True, has_v, has_a, dur, size, msg)
