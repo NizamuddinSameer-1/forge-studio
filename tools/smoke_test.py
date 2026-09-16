@@ -6,8 +6,9 @@ Run the studio first, then:
     python tools/smoke_test.py 8010       # or a custom port
 
 It drives the real HTTP surface: upload -> refuse-export-before-hash ->
-hash job -> poll -> reuse-on-export -> staleness guard -> download.
-Exits non-zero on the first failure.
+hash job -> poll (with step tracking) -> exact 1080x1920 export canvas ->
+reuse-on-export -> staleness guard -> download. Exits non-zero on the
+first failure.
 """
 import json
 import os
@@ -87,15 +88,24 @@ payload = {
     "trim_end": None,
     "crop": {"enabled": True, "x": 0, "y": 0, "width": 1080, "height": 1920},
     "color_grade": {"sharpen": 0.4, "brightness": 0.03, "contrast": 1.05,
-                    "saturation": 1.1, "temperature": 0.05},
-    "mask": {"enabled": False},
+                    "saturation": 1.1, "temperature": 0.05,
+                    "exposure": 0.1, "highlights": 0.1, "shadows": 0.1,
+                    "tint": 0.0, "fade": 0.05, "grain": 0.1, "vignette": 0.2},
+    "masks": [
+        {"id": "m1", "enabled": True, "x": 40, "y": 1700, "width": 300,
+         "height": 90, "blur": 22, "mode": "blur"},
+        {"id": "m2", "enabled": True, "x": 700, "y": 60, "width": 200,
+         "height": 80, "blur": 18, "mode": "pixelate"},
+    ],
     "text_layers": [{
         "id": "t1", "text": "UNIQUE HOOK", "x": 40, "y": 120,
         "font_family": "Impact", "font_size": 64, "color": "#FFFFFF",
         "stroke_color": "#000000", "stroke_width": 4,
         "bg_enabled": False, "bg_color": "#000000", "bg_opacity": 0.6,
+        "start": None, "end": None,
     }],
     "hashing": {"enabled": True, "profile": PROFILE, "seed": 42, "pad": True},
+    "export": {"resolution": "1080p"},
 }
 
 print("\n2. export before hashing must be refused")
@@ -108,13 +118,17 @@ check("hash job accepted", code == 200, str(job.get("detail"))[:70])
 job_id = job["job_id"]
 print(f"  job_id={job_id}")
 
-print("\n4. poll")
-seen, result, last_p = 0, None, "init"
+print("\n4. poll (watching pipeline steps)")
+seen, result, last_p, last_step = 0, None, "init", None
 deadline = time.time() + 900
 while time.time() < deadline:
     st = get_json(f"/api/hash/{job_id}?since={seen}")
     for line in st["logs"]:
         print(f"  [{st['elapsed']:6.1f}s] {line}")
+    step = st.get("step") or {}
+    if step.get("current") != last_step:
+        print(f"  [{st['elapsed']:6.1f}s] >>> step {step.get('current')}/{step.get('total')}: {step.get('label')}")
+        last_step = step.get("current")
     if st.get("progress") != last_p:
         print(f"  [{st['elapsed']:6.1f}s] ...progress {st.get('progress')}%")
         last_p = st.get("progress")
@@ -127,11 +141,16 @@ while time.time() < deadline:
 else:
     raise SystemExit("FAILED: job did not finish within 15 minutes")
 
-print("\n5. hashing actually happened")
+check("stepper reached the end", (st.get("step") or {}).get("label") == "Complete")
+
+print("\n5. hashing actually happened, at the EXACT export canvas")
 check("hashing applied", result["hashing_applied"] is True)
 check("SHA-256 changed", result["hash_changed"] is True)
 check("no temp name leaked into the filename", "temp_edit" not in result["file_name"],
       result["file_name"])
+check("output is exactly 1080x1920 (9:16 canvas)",
+      result["width"] == 1080 and result["height"] == 1920,
+      f"{result['width']}x{result['height']}")
 print(f"  {result['file_name']}  {result['width']}x{result['height']}  {result['size_mb']}MB")
 
 print("\n6. export after hashing reuses the hashed file")
